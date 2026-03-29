@@ -2,6 +2,10 @@
 
 This workspace is now the clean build target for the full research agent.
 
+Detailed walkthrough:
+
+- `docs/architecture_walkthrough.md`
+
 ## Why We Pivoted
 
 The original single-file React artifact spec is good for a class demo, but it is not the best foundation for a serious research assistant. We are keeping the UI shell as a fast preview, but the production path is:
