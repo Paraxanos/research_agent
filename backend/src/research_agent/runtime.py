@@ -1,6 +1,7 @@
 import os
 from contextlib import nullcontext
 from copy import deepcopy
+import re
 
 from research_agent.config import AppSettings
 from research_agent.graph.builder import REVIEWER_STATE_KEYS, build_graph, extract_reviewer_state
@@ -137,8 +138,11 @@ class ResearchAgentRuntime:
                 enabled=True,
             )
 
-        with trace_context:
-            result = self._graph.invoke(payload)
+        try:
+            with trace_context:
+                result = self._graph.invoke(payload)
+        except Exception as error:
+            return self._safe_chat_fallback(request=request, error=error)
         if request.mode == Mode.REVIEWER and request.review_paper_id:
             self._save_reviewer_state(
                 session_id=request.session_id,
@@ -152,6 +156,72 @@ class ResearchAgentRuntime:
             citations=result.get("citations", []),
             debug=result.get("debug", {}),
         )
+
+    def _safe_chat_fallback(self, *, request: ChatRequest, error: Exception) -> ChatResponse:
+        paper_scope = request.paper_ids
+        if request.mode == Mode.REVIEWER and request.review_paper_id:
+            paper_scope = [request.review_paper_id]
+        hits = self._retriever.search(
+            query=request.message,
+            paper_ids=paper_scope,
+            top_k=3,
+        )
+        citations = [
+            {
+                "paper_id": hit.paper_id,
+                "filename": hit.filename,
+                "snippet": hit.snippet,
+                "chunk_id": hit.chunk_id,
+                "page": None,
+            }
+            for hit in hits[:2]
+        ]
+
+        if hits:
+            top = self._compact_snippet(hits[0].snippet)
+            if request.mode == Mode.REVIEWER:
+                answer = (
+                    "## Reviewer Arena\n"
+                    "Fallback review response\n\n"
+                    f"- Strongest grounded evidence: {top} [1]\n"
+                    "- Provisional concern: clarify evidence boundaries and quantify one key claim [1].\n"
+                    "- Action: revise the target paragraph to include one concrete metric and explicit scope language.\n"
+                )
+            elif request.mode == Mode.COMPARATOR and len(hits) >= 2:
+                second = self._compact_snippet(hits[1].snippet)
+                answer = (
+                    f"Paper 1 evidence: {top} [1]\n\n"
+                    f"Paper 2 evidence: {second} [2]\n\n"
+                    "Use these excerpts as the grounded baseline comparison."
+                )
+            else:
+                answer = f"Based on the uploaded papers: {top} [1]"
+        else:
+            answer = (
+                "I could not retrieve enough grounded evidence for that request. "
+                "Try a more specific paper-focused question."
+            )
+
+        debug = {
+            "response_stage": "runtime_safe_fallback",
+            "model_fallback": True,
+            "error_type": type(error).__name__,
+            "model_error": str(error)[:180],
+        }
+        return ChatResponse(
+            session_id=request.session_id,
+            mode=request.mode,
+            answer=answer,
+            citations=citations,
+            debug=debug,
+        )
+
+    @staticmethod
+    def _compact_snippet(text: str, max_chars: int = 420) -> str:
+        cleaned = re.sub(r"\s+", " ", (text or "")).strip()
+        if len(cleaned) <= max_chars:
+            return cleaned
+        return f"{cleaned[: max_chars - 3].rstrip()}..."
 
     def _configure_langsmith(self) -> None:
         if not self._settings.langsmith_tracing:

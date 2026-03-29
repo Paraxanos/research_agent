@@ -1,9 +1,14 @@
 import hashlib
 import math
 import re
+from typing import Any
 
-from google import genai
-from google.genai import types
+try:  # pragma: no cover - optional dependency guard
+    from google import genai
+    from google.genai import types
+except Exception:  # pragma: no cover - optional dependency guard
+    genai = None  # type: ignore[assignment]
+    types = None  # type: ignore[assignment]
 
 from research_agent.config import AppSettings
 
@@ -11,11 +16,11 @@ from research_agent.config import AppSettings
 class GeminiEmbeddingService:
     def __init__(self, settings: AppSettings) -> None:
         self._settings = settings
-        self._client: genai.Client | None = None
+        self._client: Any = None
 
     @property
     def available(self) -> bool:
-        return bool(self._settings.gemini_api_key)
+        return bool(self._settings.gemini_api_key) and genai is not None and types is not None
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return self._embed(texts, task_type="RETRIEVAL_DOCUMENT")
@@ -28,7 +33,9 @@ class GeminiEmbeddingService:
 
     def _embed(self, texts: list[str], *, task_type: str) -> list[list[float]]:
         if not self.available:
-            raise RuntimeError("GEMINI_API_KEY is required for embedding generation.")
+            if not self._settings.gemini_api_key:
+                raise RuntimeError("GEMINI_API_KEY is required for embedding generation.")
+            raise RuntimeError("Gemini SDK is not installed. Run pip install google-genai.")
 
         if not texts:
             return []
@@ -52,8 +59,10 @@ class GeminiEmbeddingService:
             vectors.extend(batch_vectors)
         return vectors
 
-    def _client_or_create(self) -> genai.Client:
+    def _client_or_create(self) -> Any:
         if self._client is None:
+            if genai is None:
+                raise RuntimeError("Gemini SDK is not installed.")
             self._client = genai.Client(api_key=self._settings.gemini_api_key)
         return self._client
 

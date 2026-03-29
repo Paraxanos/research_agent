@@ -115,7 +115,7 @@ function normalizeCitations(citations) {
 function simplifyError(detail) {
   const text = String(detail || "").trim();
   if (/rate limit reached/i.test(text) && /groq|tokens per day|rate_limit_exceeded/i.test(text)) {
-    return "Groq quota reached right now. The app will use lightweight fallback responses until quota resets.";
+    return "Groq quota reached. Auto-failover is active, so responses may be slightly slower for now.";
   }
   return text || "Request failed.";
 }
@@ -390,7 +390,7 @@ function ResearchAgent() {
               <div className="ra-title">{currentMode.name}</div>
               <div className="ra-meta">
                 <span className="ra-badge">{papers.length} papers indexed</span>
-                <span className="ra-badge">{health.llm_available ? "Groq ready" : "Add API keys"}</span>
+                <span className="ra-badge">{health.llm_available ? "LLM failover ready" : "Add API keys"}</span>
                 {activeMode === "comparator" ? <span className="ra-badge" style={{ color: currentMode.hex }}>{selectedPaperIds.length}/3 selected</span> : null}
               </div>
             </div>

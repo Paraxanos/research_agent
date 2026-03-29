@@ -764,34 +764,41 @@ def _fallback_without_model(state: GraphState) -> str:
 def _rate_limit_fallback_answer(state: GraphState, *, retry_hint: str) -> str:
     mode = state["mode"]
     documents = state.get("retrieved_documents", [])
-    hint = f" Try again in about {retry_hint}." if retry_hint else " Try again shortly."
     if mode == Mode.LOCAL:
         if not documents:
             return "This information is not in your uploaded papers."
         return _local_extractive_fallback(
             query=state.get("message", ""),
             documents=documents,
-            retry_hint=hint,
         )
     if mode == Mode.GLOBAL:
+        if documents:
+            return _local_extractive_fallback(
+                query=state.get("message", ""),
+                documents=documents,
+            )
         return (
-            "Model generation is temporarily unavailable while producing this response."
-            f"{hint} I can continue in paper-grounded fallback mode if you want."
+            "I could not find enough grounded evidence in the uploaded papers for this request. "
+            "Try a paper-specific question or upload a relevant source."
         )
     if mode == Mode.COMPARATOR:
         if not documents:
             return "I could not retrieve enough evidence from the selected papers."
         return (
-            "Model generation is temporarily unavailable. Here are the strongest comparison excerpts for now:\n\n"
+            "Here are the strongest comparison excerpts from the selected papers:\n\n"
             f"{_format_context(documents, max_docs=min(3, len(documents)))}"
         )
     return (
-        "Model generation is temporarily unavailable, so I returned a lightweight fallback response."
-        f"{hint}"
+        _local_extractive_fallback(
+            query=state.get("message", ""),
+            documents=documents,
+        )
+        if documents
+        else "I could not find enough grounded evidence in the retrieved context."
     )
 
 
-def _local_extractive_fallback(*, query: str, documents: list[Document], retry_hint: str) -> str:
+def _local_extractive_fallback(*, query: str, documents: list[Document]) -> str:
     query_terms = set(_tokenize_for_overlap(query))
     query_phrases = _query_phrases(query)
     lower_query = (query or "").lower()
@@ -799,11 +806,7 @@ def _local_extractive_fallback(*, query: str, documents: list[Document], retry_h
     if quantity_intent and any(token.startswith("expert") for token in query_terms):
         quantity_snippet = _extract_quantity_snippet(documents=documents, keyword="expert")
         if quantity_snippet:
-            return (
-                "Model generation is temporarily unavailable, but the retrieved evidence indicates:\n\n"
-                f"{quantity_snippet} [1]\n\n"
-                f"{retry_hint}"
-            )
+            return f"Based on the uploaded paper: {quantity_snippet} [1]"
         return (
             "This information is not in your uploaded papers. "
             "The retrieved context discusses mixture-of-experts concepts but does not provide a clear numeric expert count."
@@ -837,18 +840,11 @@ def _local_extractive_fallback(*, query: str, documents: list[Document], retry_h
     candidates.sort(key=lambda item: item[0], reverse=True)
     best_score, best_snippet = candidates[0]
     if best_score < 0.20:
-        return (
-            "This information is not in your uploaded papers. "
-            "Model generation is temporarily unavailable, and no high-confidence evidence was found in retrieved context."
-        )
+        return "This information is not in your uploaded papers."
 
     cleaned_best = re.sub(r"\[[0-9]+\]", "", best_snippet)
     cleaned_best = re.sub(r"\s+", " ", cleaned_best).strip()
-    return (
-        "Model generation is temporarily unavailable, but the retrieved evidence indicates:\n\n"
-        f"{cleaned_best} [1]\n\n"
-        f"{retry_hint}"
-    )
+    return f"Based on the uploaded paper: {cleaned_best} [1]"
 
 
 def _looks_like_reference_snippet(text: str) -> bool:
@@ -908,11 +904,9 @@ def _reviewer_rate_limit_fallback(state: GraphState, *, retry_hint: str) -> str:
         "quote": _default_quote(documents),
         "skeptic_lead": "Novelty strength is unclear without explicit comparative evidence.",
     }
-    hint = f"Try again in about {retry_hint}." if retry_hint else "Try again shortly."
     quote = active.get("quote", _default_quote(documents))
     return (
         "## Reviewer Arena\n"
-        "Temporary fallback mode (model unavailable)\n\n"
         f"Active Vector: {active.get('id', 'V1')} - {active.get('claim', '')}\n"
         f"Quote Trigger: \"{quote}\"\n\n"
         "### Skeptic\n"
@@ -925,7 +919,7 @@ def _reviewer_rate_limit_fallback(state: GraphState, *, retry_hint: str) -> str:
         "Target Section: contribution framing paragraph\n"
         "Rewrite Instruction: revise the contribution claim to include one concrete metric/baseline comparison and explicitly state the scope limits.\n"
         "Why: this preserves strengths while reducing overclaim risk.\n\n"
-        f"Model unavailable signal detected. {hint}"
+        "Intervention: ask either reviewer to sharpen evidence or move to the next vector."
     )
 
 
@@ -1785,6 +1779,8 @@ def _route_reviewer_turn(
         return "synthesise"
     if resolution == "force_closed":
         return "synthesise"
+    if turn_count == 0:
+        return "skeptic"
 
     last_turn = _last_vector_turn(history, active_vector_id)
     if last_turn and str(last_turn.get("speaker", "")) == "user":
@@ -2240,23 +2236,86 @@ def _fallback_reviewer_turn(
     documents: list[Document],
 ) -> str:
     quote = str(active_vector.get("quote", "")).strip() or _default_quote(documents)
+    evidence = _fallback_vector_evidence(active_vector=active_vector, documents=documents, limit=2)
+    primary = evidence[0] if evidence else quote
+    secondary = evidence[1] if len(evidence) > 1 else primary
     if speaker == "skeptic":
         return (
             "Position: Evidence for this claim is still not tight enough.\n"
             "Argument:\n"
             f"- Triggered claim: \"{quote}\"\n"
-            "- Concern: the current evidence could be interpreted more narrowly [1].\n"
-            "- Request: add one concrete comparison and bound the claim scope [1].\n"
+            f"- Evidence check: \"{primary}\" [1].\n"
+            "- Concern: this supports feasibility, but not a strong novelty delta versus prior work [1].\n"
+            "- Request: add one quantitative comparator and explicitly bound the scope claim [1].\n"
             'ROUTE_JSON: {"addressed_to":"advocate","concession":false,"confidence":0.54}'
         )
     return (
         "Position: The claim has partial support but should be framed with clearer limits.\n"
         "Argument:\n"
         f"- Triggered claim: \"{quote}\"\n"
-        "- Defense: key support exists in the retrieved evidence [1].\n"
-        "- Revision path: preserve contribution, narrow wording, and add a specific metric [1].\n"
+        f"- Supporting evidence: \"{primary}\" [1].\n"
+        f"- Scope caveat already present: \"{secondary}\" [1].\n"
+        "- Revision path: keep the contribution framing but tighten novelty wording to the measured scope [1].\n"
         'ROUTE_JSON: {"addressed_to":"skeptic","concession":false,"confidence":0.56}'
     )
+
+
+def _fallback_vector_evidence(
+    *,
+    active_vector: dict[str, Any],
+    documents: list[Document],
+    limit: int,
+) -> list[str]:
+    if not documents:
+        return []
+    query = " ".join(
+        [
+            str(active_vector.get("claim", "")),
+            str(active_vector.get("category", "")),
+            str(active_vector.get("quote", "")),
+            str(active_vector.get("skeptic_lead", "")),
+        ]
+    )
+    query_terms = set(_tokenize_for_overlap(query))
+    query_phrases = _query_phrases(query)
+    candidates: list[tuple[float, str]] = []
+    for doc_index, document in enumerate(documents[:4]):
+        text = (document.page_content or "").strip()
+        if not text:
+            continue
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        doc_prior = max(0.05, 1.0 - (doc_index / max(1, len(documents))))
+        for sentence in sentences:
+            snippet = sentence.strip()
+            if len(snippet) < 30:
+                continue
+            if _looks_like_reference_snippet(snippet):
+                continue
+            overlap = _overlap_score(snippet.lower(), query_terms)
+            phrase = _phrase_overlap_score(_normalize_for_phrase_match(snippet.lower()), query_phrases)
+            numeric_bonus = 0.15 if re.search(r"\b\d+(?:\.\d+)?%?\b", snippet) else 0.0
+            score = (0.9 * overlap) + (0.8 * phrase) + (0.2 * doc_prior) + numeric_bonus
+            score -= min(0.3, _low_signal_penalty(snippet))
+            candidates.append((score, snippet))
+    if not candidates:
+        return []
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    selected: list[str] = []
+    seen_norm: set[str] = set()
+    for score, snippet in candidates:
+        if score < 0.18:
+            continue
+        normalized = re.sub(r"\s+", " ", re.sub(r"\[[0-9]+\]", "", snippet)).strip()
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen_norm:
+            continue
+        seen_norm.add(key)
+        selected.append(normalized)
+        if len(selected) >= max(1, limit):
+            break
+    return selected
 
 
 def _clean_reviewer_turn_text(text: str) -> str:

@@ -31,6 +31,14 @@ class AppSettings(BaseSettings):
         default="auto",
         alias="GENERATION_PROVIDER",
     )
+    generation_fallback_order: str = Field(
+        default="gemini,groq",
+        alias="GENERATION_FALLBACK_ORDER",
+    )
+    generation_provider_cooldown_seconds: int = Field(
+        default=600,
+        alias="GENERATION_PROVIDER_COOLDOWN_SECONDS",
+    )
     gemini_generation_model: str = Field(
         default="gemini-2.0-flash",
         alias="GEMINI_MODEL",

@@ -1,5 +1,13 @@
-from google import genai
-from google.genai import types
+from __future__ import annotations
+
+from typing import Any
+
+try:  # pragma: no cover - optional dependency guard
+    from google import genai
+    from google.genai import types
+except Exception:  # pragma: no cover - optional dependency guard
+    genai = None  # type: ignore[assignment]
+    types = None  # type: ignore[assignment]
 
 from research_agent.config import AppSettings
 
@@ -7,11 +15,11 @@ from research_agent.config import AppSettings
 class GeminiTextService:
     def __init__(self, settings: AppSettings) -> None:
         self._settings = settings
-        self._client: genai.Client | None = None
+        self._client: Any = None
 
     @property
     def available(self) -> bool:
-        return bool(self._settings.gemini_api_key)
+        return bool(self._settings.gemini_api_key) and genai is not None and types is not None
 
     def generate(
         self,
@@ -22,7 +30,9 @@ class GeminiTextService:
         max_output_tokens: int = 1200,
     ) -> str:
         if not self.available:
-            raise RuntimeError("GEMINI_API_KEY is required for Gemini generation.")
+            if not self._settings.gemini_api_key:
+                raise RuntimeError("GEMINI_API_KEY is required for Gemini generation.")
+            raise RuntimeError("Gemini SDK is not installed. Run pip install google-genai.")
 
         response = self._client_or_create().models.generate_content(
             model=self._settings.gemini_generation_model,
@@ -40,7 +50,9 @@ class GeminiTextService:
 
         raise RuntimeError("Gemini response did not include output text.")
 
-    def _client_or_create(self) -> genai.Client:
+    def _client_or_create(self) -> Any:
         if self._client is None:
+            if genai is None:
+                raise RuntimeError("Gemini SDK is not installed.")
             self._client = genai.Client(api_key=self._settings.gemini_api_key)
         return self._client

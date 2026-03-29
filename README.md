@@ -131,6 +131,8 @@ Important environment variables:
 - `GEMINI_API_KEY`
 - `PINECONE_API_KEY`
 - `GENERATION_PROVIDER` (`auto`, `groq`, `gemini`)
+- `GENERATION_FALLBACK_ORDER` (default: `gemini,groq`)
+- `GENERATION_PROVIDER_COOLDOWN_SECONDS` (default: `600`)
 - `GROQ_MODEL` (default: `llama-3.3-70b-versatile`)
 - `GEMINI_MODEL` (default: `gemini-2.0-flash`)
 - `EMBEDDING_PROVIDER` (`local`, `auto`, `gemini`)
