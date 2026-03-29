@@ -16,6 +16,11 @@ class TextGenerationService:
         self._gemini = GeminiTextService(settings)
         self._openrouter = OpenRouterTextService(settings)
         self._cooldowns: dict[str, float] = {}
+        self._last_provider: str = ""
+
+    @property
+    def last_provider(self) -> str:
+        return self._last_provider
 
     @property
     def available(self) -> bool:
@@ -87,12 +92,14 @@ class TextGenerationService:
                 max_output_tokens=max_output_tokens,
             )
         try:
-            return service.generate(
+            generated = service.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
             )
+            self._last_provider = preferred
+            return generated
         except Exception as error:  # pragma: no cover - provider-specific network errors
             attempts.append(f"{preferred}: {str(error)[:180]}")
             self._mark_provider_cooldown(preferred, error)
@@ -106,12 +113,14 @@ class TextGenerationService:
             if self._in_cooldown(provider_name):
                 continue
             try:
-                return fallback_service.generate(
+                generated = fallback_service.generate(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=temperature,
                     max_output_tokens=max_output_tokens,
                 )
+                self._last_provider = provider_name
+                return generated
             except Exception as error:  # pragma: no cover - provider-specific network errors
                 attempts.append(f"{provider_name}: {str(error)[:180]}")
                 self._mark_provider_cooldown(provider_name, error)
@@ -139,12 +148,14 @@ class TextGenerationService:
                 continue
             attempted_any = True
             try:
-                return service.generate(
+                generated = service.generate(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=temperature,
                     max_output_tokens=max_output_tokens,
                 )
+                self._last_provider = name
+                return generated
             except Exception as error:  # pragma: no cover - provider-specific network errors
                 attempts.append(f"{name}: {str(error)[:180]}")
                 self._mark_provider_cooldown(name, error)
@@ -157,12 +168,14 @@ class TextGenerationService:
                 if service is None or not service.available:
                     continue
                 try:
-                    return service.generate(
+                    generated = service.generate(
                         system_prompt=system_prompt,
                         user_prompt=user_prompt,
                         temperature=temperature,
                         max_output_tokens=max_output_tokens,
                     )
+                    self._last_provider = name
+                    return generated
                 except Exception as error:  # pragma: no cover - provider-specific network errors
                     attempts.append(f"{name}: {str(error)[:180]}")
                     self._mark_provider_cooldown(name, error)

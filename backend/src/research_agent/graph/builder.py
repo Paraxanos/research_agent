@@ -61,6 +61,8 @@ def _prepare_mode_step(state: GraphState) -> GraphState:
             "Answer only from the retrieved paper excerpts. "
             "Do not use outside knowledge. "
             "For every factual claim, attach inline citations like [1], [2]. "
+            "For count questions, if the excerpt lists numbered entities (for example Expert 1 ... Expert 6), "
+            "infer the minimum explicit count from the highest listed index and state it as 'at least N'. "
             "If evidence is missing, respond with exactly: "
             "'This information is not in your uploaded papers.' "
             "Then briefly name what is missing and offer Global mode."
@@ -119,7 +121,11 @@ def _retrieve_step(state: GraphState) -> GraphState:
     mode = state["mode"]
     paper_ids = state.get("paper_ids", [])
     debug = dict(state.get("debug", {}))
-    query = state["message"]
+    query = _contextualize_query(
+        message=state["message"],
+        history=state.get("history", []),
+        mode=mode,
+    )
 
     if mode == Mode.REVIEWER and state.get("review_paper_id"):
         paper_ids = [state["review_paper_id"]]
@@ -203,6 +209,8 @@ def _retrieve_general_hits(
         return [], []
 
     per_query_top_k = max(settings.retrieval_top_k, settings.rerank_top_n + 4)
+    if mode == Mode.LOCAL:
+        per_query_top_k = max(per_query_top_k, settings.retrieval_top_k * 3)
     aggregated: list[tuple[Document, float]] = []
     for index, subquery in enumerate(subqueries):
         hits = dense_retriever.retrieve(
@@ -225,6 +233,8 @@ def _retrieve_general_hits(
     merged = list(best_by_chunk.values())
     merged.sort(key=lambda item: item[1], reverse=True)
     target = max(settings.retrieval_top_k * 3, settings.rerank_top_n + 8)
+    if mode == Mode.LOCAL:
+        target = max(target, settings.retrieval_top_k * 6)
     return [(document, score) for document, score in merged[:target]], subqueries
 
 
@@ -235,12 +245,23 @@ def _general_subqueries(*, query: str, mode: Mode) -> list[str]:
 
     focused = _focused_retrieval_query(base)
     lower = base.lower()
+    quantity_intent = any(marker in lower for marker in ("how many", "number", "count", "how much"))
+    expert_intent = any(token.startswith("expert") for token in _tokenize_for_overlap(lower))
     seeds = [base]
     if focused and focused.lower() != lower:
         seeds.append(focused)
 
     if "mixture of experts" in lower or re.search(r"\bmoe\b", lower):
         seeds.append(f"{focused or base} mixture of experts model MoE")
+    if mode == Mode.GLOBAL and _is_global_person_query(base):
+        seeds.append(f"{focused or base} author authors corresponding author affiliation email")
+    if expert_intent and quantity_intent:
+        seeds.append(
+            f"{focused or base} number of experts specific experts shared experts parameter analysis ablation"
+        )
+        seeds.append(f"{focused or base} expert 1 expert 2 expert 3 expert 4 expert 5 expert 6")
+    if "transformer" in lower and re.search(r"\bhead\b|\bheads\b", lower):
+        seeds.append(f"{focused or base} transformer attention heads multi-head")
     if "eeg" in lower:
         seeds.append(f"{focused or base} EEG model architecture dataset")
     if "model" in lower:
@@ -299,6 +320,60 @@ def _focused_retrieval_query(query: str) -> str:
     if not kept:
         kept = tokens
     return " ".join(kept[:20])
+
+
+def _contextualize_query(*, message: str, history: list[dict[str, Any]], mode: Mode) -> str:
+    current = (message or "").strip()
+    if not current:
+        return ""
+    if mode == Mode.REVIEWER:
+        return current
+    if not _is_followup_style_query(current):
+        return current
+    previous_user = _latest_user_history_message(history=history, exclude=current)
+    if not previous_user:
+        return current
+    return f"{previous_user} {current}".strip()
+
+
+def _is_followup_style_query(message: str) -> bool:
+    lower = (message or "").strip().lower()
+    if not lower:
+        return False
+    tokens = _tokenize_for_overlap(lower)
+    if len(tokens) <= 6:
+        return True
+    followup_markers = (
+        "that",
+        "this",
+        "it",
+        "same",
+        "exact number",
+        "just number",
+        "that's it",
+        "thats it",
+        "only",
+    )
+    return any(marker in lower for marker in followup_markers)
+
+
+def _latest_user_history_message(*, history: list[dict[str, Any]], exclude: str) -> str:
+    if not history:
+        return ""
+    excluded = " ".join((exclude or "").strip().lower().split())
+    for item in reversed(history):
+        if str(item.get("role", "")).lower() != "user":
+            continue
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        normalized = " ".join(content.lower().split())
+        if normalized == excluded:
+            continue
+        if _is_auto_reviewer_bootstrap(content):
+            continue
+        return content
+    return ""
 
 
 def _retrieve_reviewer_hits(
@@ -374,9 +449,14 @@ def _rerank_step(state: GraphState) -> GraphState:
         return {}
 
     mode = state["mode"]
-    query_terms = set(_tokenize_for_overlap(state.get("message", "")))
-    query_phrases = _query_phrases(state.get("message", ""))
+    query_text = state.get("message", "")
+    query_terms = set(_tokenize_for_overlap(query_text))
+    query_phrases = _query_phrases(query_text)
+    anchor_terms = _anchor_terms_for_query(query_text)
     focus_terms = set(_tokenize_for_overlap(" ".join(_mode_keywords(mode))))
+    quantity_intent = any(marker in (query_text or "").lower() for marker in ("how many", "number", "count", "how much"))
+    expert_count_query = quantity_intent and any(token.startswith("expert") for token in query_terms)
+    person_query = mode == Mode.GLOBAL and _is_global_person_query(query_text)
 
     scored: list[tuple[Document, float]] = []
     for index, document in enumerate(documents):
@@ -387,6 +467,7 @@ def _rerank_step(state: GraphState) -> GraphState:
         rank_prior = max(0.05, 1.0 - (index / max(1, len(documents))))
         overlap = _overlap_score(lower, query_terms)
         phrase_overlap = _phrase_overlap_score(normalized_text, query_phrases)
+        anchor_overlap = _overlap_score(lower, anchor_terms) if anchor_terms else 0.0
         focus_overlap = _overlap_score(lower, focus_terms)
 
         section_boost = 0.0
@@ -400,15 +481,38 @@ def _rerank_step(state: GraphState) -> GraphState:
             marker in lower for marker in ("dataset", "baseline", "sota", "accuracy", "f1")
         ):
             section_boost += 0.10
+        if person_query and _looks_author_metadata_text(lower):
+            section_boost += 0.75
+        has_number_phrase = "number of experts" in lower
+        has_numbered_experts = _has_numbered_expert_pattern(lower)
+        has_any_number = bool(re.search(r"\b\d+\b", lower))
+        if expert_count_query and has_numbered_experts:
+            section_boost += 0.90
+        elif expert_count_query and has_number_phrase:
+            section_boost += 0.55
 
         quality_penalty = _low_signal_penalty(text)
+        anchor_penalty = 0.0
+        if anchor_terms and anchor_overlap < 0.34:
+            anchor_penalty += 0.30
+        if expert_count_query and (has_number_phrase or has_numbered_experts):
+            anchor_penalty = max(0.0, anchor_penalty - 0.30)
+        if expert_count_query and "expert" in lower and not has_any_number and not has_number_phrase:
+            anchor_penalty += 0.35
+        if {"mixture", "experts"}.issubset(anchor_terms):
+            if "player" in lower and "novice" in lower and "intermediate" in lower:
+                anchor_penalty += 0.35
+        if person_query and not _looks_author_metadata_text(lower):
+            anchor_penalty += 0.18
         total = (
             rank_prior
             + (0.9 * overlap)
             + (0.7 * phrase_overlap)
+            + (1.0 * anchor_overlap)
             + (0.6 * focus_overlap)
             + section_boost
             - quality_penalty
+            - anchor_penalty
         )
         scored.append((document, total))
 
@@ -479,7 +583,10 @@ def _draft_answer_step(state: GraphState) -> GraphState:
                 debug["retry_hint"] = retry_hint
             debug["model_error"] = str(error)[:180]
             return {
-                "draft_answer": fallback_text,
+                "draft_answer": _prefix_retrieval_fallback(
+                    fallback_text,
+                    retry_hint=retry_hint,
+                ),
                 "citations": state.get("citations", []),
                 "debug": debug,
             }
@@ -511,6 +618,13 @@ def _draft_answer_step(state: GraphState) -> GraphState:
             "citations": [],
             "debug": {**debug, "response_stage": "empty_local_context"},
         }
+    if mode == Mode.LOCAL and _insufficient_local_grounding(query=state.get("message", ""), documents=documents):
+        debug["response_stage"] = "local_low_relevance"
+        return {
+            "draft_answer": "This information is not in your uploaded papers.",
+            "citations": [],
+            "debug": debug,
+        }
 
     if not text_service.available:
         draft_answer = _fallback_without_model(state)
@@ -541,15 +655,19 @@ def _draft_answer_step(state: GraphState) -> GraphState:
             temperature=_temperature_for_mode(mode),
             max_output_tokens=max_output_tokens,
         )
+        debug["model_provider"] = text_service.last_provider or "unknown"
     except Exception as error:
         retry_hint = _extract_retry_hint(error)
-        draft_answer = _rate_limit_fallback_answer(state, retry_hint=retry_hint)
+        draft_answer = _prefix_retrieval_fallback(
+            _rate_limit_fallback_answer(state, retry_hint=retry_hint),
+            retry_hint=retry_hint,
+        )
         debug["response_stage"] = "model_fallback"
         debug["model_fallback"] = True
         if retry_hint:
             debug["retry_hint"] = retry_hint
         debug["model_error"] = str(error)[:180]
-    if debug.get("response_stage") != "rate_limit_fallback":
+    if not debug.get("model_fallback"):
         debug["response_stage"] = "draft_model"
     debug["used_context_docs"] = len(prompt_documents)
     return {
@@ -566,6 +684,13 @@ def _validate_answer_step(state: GraphState) -> GraphState:
     debug = dict(state.get("debug", {}))
     if not draft:
         return {"debug": debug}
+
+    if mode == Mode.LOCAL and debug.get("response_stage") == "local_low_relevance":
+        return {
+            "validated_answer": draft,
+            "validation_issues": [],
+            "debug": {**debug, "validation_stage": "local_low_relevance_bypassed"},
+        }
 
     if mode == Mode.WRITER:
         return {
@@ -645,6 +770,12 @@ def _finalize_answer_step(state: GraphState) -> GraphState:
     answer = validated_answer or draft_answer
     if not answer and mode == Mode.LOCAL and not documents:
         answer = "This information is not in your uploaded papers."
+    if mode == Mode.GLOBAL and _is_global_recommendation_query(state.get("message", "")):
+        answer = _strip_inline_reference_markers(answer)
+        debug["global_citation_cleanup"] = "recommendation_query"
+    if mode == Mode.GLOBAL and debug.get("global_context_relevance") == "low":
+        answer = _strip_inline_reference_markers(answer)
+        debug["global_citation_cleanup"] = "applied"
 
     if mode in {Mode.LOCAL, Mode.REVIEWER, Mode.COMPARATOR} and documents and not _has_inline_citations(answer):
         debug["citation_warning"] = "Answer lacked inline citations after validation."
@@ -752,13 +883,22 @@ def _fallback_without_model(state: GraphState) -> str:
         ]
         return (
             "Hybrid retrieval found relevant paper evidence, but no text model is configured yet "
-            "(`GROQ_API_KEY` or `GEMINI_API_KEY`). "
+            "(`GROQ_API_KEY`, `GEMINI_API_KEY`, or `OPENROUTER_API_KEY`). "
             "Here are the strongest grounded excerpts:\n\n"
             + "\n\n".join(blocks)
         )
     return (
-        "Retrieval is working, but model generation is disabled until `GROQ_API_KEY` or `GEMINI_API_KEY` is set in `backend/.env`."
+        "Retrieval is working, but model generation is disabled until `GROQ_API_KEY`, "
+        "`GEMINI_API_KEY`, or `OPENROUTER_API_KEY` is set in `backend/.env`."
     )
+
+
+def _prefix_retrieval_fallback(answer: str, *, retry_hint: str) -> str:
+    guidance = f" Try again in about {retry_hint}." if retry_hint else " Try again shortly."
+    return (
+        "Model generation is temporarily unavailable, so this is a retrieval-only fallback."
+        f"{guidance}\n\n{answer.strip()}"
+    ).strip()
 
 
 def _rate_limit_fallback_answer(state: GraphState, *, retry_hint: str) -> str:
@@ -806,6 +946,12 @@ def _local_extractive_fallback(*, query: str, documents: list[Document]) -> str:
     if quantity_intent and any(token.startswith("expert") for token in query_terms):
         quantity_snippet = _extract_quantity_snippet(documents=documents, keyword="expert")
         if quantity_snippet:
+            expert_count = _infer_expert_count(quantity_snippet)
+            if expert_count is not None:
+                return (
+                    "Based on the uploaded paper: "
+                    f"at least {expert_count} experts are explicitly described. {quantity_snippet} [1]"
+                )
             return f"Based on the uploaded paper: {quantity_snippet} [1]"
         return (
             "This information is not in your uploaded papers. "
@@ -886,7 +1032,36 @@ def _extract_quantity_snippet(*, documents: list[Document], keyword: str) -> str
                 return snippet
             if re.search(rf"\b{re.escape(keyword)}s?\s*(?:is|are|were|was|=|:)?\s*\d+\b", lower):
                 return snippet
+            if keyword == "expert" and "expert" in lower:
+                if re.search(r"\b\d+\b", lower):
+                    return snippet
     return ""
+
+
+def _infer_expert_count(snippet: str) -> int | None:
+    text = (snippet or "").lower()
+    if "expert" not in text:
+        return None
+    values = [int(value) for value in re.findall(r"\b\d+\b", text)]
+    if not values:
+        return None
+    high = max(values)
+    if high <= 0:
+        return None
+    return high
+
+
+def _has_numbered_expert_pattern(text: str) -> bool:
+    lower = (text or "").lower()
+    if "expert" not in lower:
+        return False
+    if re.search(r"\bexperts?\s+\d+\b", lower):
+        return True
+    if re.search(r"\bexpert\s+\d+\b", lower):
+        return True
+    if re.search(r"\bexperts?\s+\d+\s*,\s*\d+", lower):
+        return True
+    return False
 
 
 def _reviewer_rate_limit_fallback(state: GraphState, *, retry_hint: str) -> str:
@@ -1080,13 +1255,35 @@ def _draft_user_prompt(
         )
 
     if mode == Mode.GLOBAL:
+        recommendation_query = _is_global_recommendation_query(message)
+        person_query = _is_global_person_query(message)
+        if recommendation_query:
+            query_directive = (
+                "- The user is asking for related-paper recommendations. "
+                "Provide 8-12 concrete papers (title + year + one-line relevance). "
+                "Use broader model knowledge and do not invent [n] citations.\n"
+            )
+        elif person_query:
+            query_directive = (
+                "- The user is asking about a person/author. "
+                "Give a useful profile-style answer (role, domain, notable work themes), "
+                "and call out ambiguity if the name could refer to multiple people.\n"
+            )
+        else:
+            query_directive = ""
         return (
             "You are producing a response in Global mode.\n"
             "Requirements:\n"
             "- Answer naturally and directly.\n"
-            "- Use retrieved paper context when it is relevant.\n"
-            "- If a claim is grounded in retrieved papers, cite it with [n].\n"
-            "- Do not force citations for general-knowledge or conversational parts.\n\n"
+            "- You are not limited to retrieved paper context; use broader model knowledge when helpful.\n"
+            "- Treat retrieved context as optional support, not a hard boundary.\n"
+            "- If a claim is grounded in retrieved paper context, cite it with [n].\n"
+            "- Never invent [n] citations for general-knowledge or conversational parts.\n"
+            "- For general questions (for example definitions or everyday knowledge), answer directly and confidently.\n"
+            "- Do not claim you are missing uploaded papers when a general answer is possible.\n"
+            "- Keep paper citations minimal in Global mode (typically 1-2 strongest references).\n"
+            "- If prior turns were paper-constrained, do not carry that constraint into this global response.\n"
+            f"{query_directive}\n"
             "Conversation history:\n"
             f"{history_text}\n\n"
             "User message:\n"
@@ -2574,24 +2771,36 @@ def _active_vector_claim(state: GraphState) -> str:
 def _is_context_relevant_to_query(query: str, documents: list[Document]) -> bool:
     if not documents:
         return False
-    if not _looks_paper_specific_query(query):
+    person_query = _is_global_person_query(query)
+    recommendation_query = _is_global_recommendation_query(query)
+    if not _looks_paper_specific_query(query) and not person_query and not recommendation_query:
         return False
     query_terms = set(_tokenize_for_overlap(query))
     if not query_terms:
         return False
+    if person_query and _has_author_metadata_in_docs(documents):
+        return True
 
     best_overlap = 0.0
     for document in documents:
         overlap = _overlap_score(document.page_content or "", query_terms)
         if overlap > best_overlap:
             best_overlap = overlap
-    return best_overlap >= 0.14
+
+    threshold = 0.14
+    if person_query:
+        threshold = 0.06
+    elif recommendation_query:
+        threshold = 0.10
+    return best_overlap >= threshold
 
 
 def _looks_paper_specific_query(query: str) -> bool:
     lower = (query or "").lower()
     markers = (
         "paper",
+        "author",
+        "authors",
         "this work",
         "this study",
         "uploaded",
@@ -2617,6 +2826,58 @@ def _looks_paper_specific_query(query: str) -> bool:
         "game was this done on",
     )
     return any(marker in lower for marker in markers)
+
+
+def _is_global_recommendation_query(query: str) -> bool:
+    lower = (query or "").lower()
+    markers = (
+        "related papers",
+        "similar papers",
+        "recommend papers",
+        "more papers",
+        "paper recommendations",
+        "literature",
+        "survey",
+        "state of the art",
+        "sota",
+    )
+    return any(marker in lower for marker in markers)
+
+
+def _is_global_person_query(query: str) -> bool:
+    lower = (query or "").lower()
+    return (
+        "who is" in lower
+        or "tell me about" in lower
+        or ("author" in lower and "paper" not in lower)
+    )
+
+
+def _has_author_metadata_in_docs(documents: list[Document]) -> bool:
+    for document in documents[:8]:
+        lower = (document.page_content or "").lower()
+        if _looks_author_metadata_text(lower):
+            return True
+    return False
+
+
+def _looks_author_metadata_text(lower_text: str) -> bool:
+    markers = (
+        "corresponding author",
+        "the authors are",
+        "authors are",
+        "e-mail",
+        "email",
+        "affiliation",
+    )
+    return any(marker in (lower_text or "") for marker in markers)
+
+
+def _strip_inline_reference_markers(text: str) -> str:
+    cleaned = re.sub(r"\s*\[[0-9]+\]", "", text or "")
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
 
 
 def _tokenize_for_overlap(text: str) -> list[str]:
@@ -2686,6 +2947,37 @@ def _query_phrases(query: str) -> list[str]:
             if len(phrases) >= 16:
                 return phrases
     return phrases
+
+
+def _anchor_terms_for_query(query: str) -> set[str]:
+    lower = (query or "").lower()
+    anchors: set[str] = set()
+    if "mixture of experts" in lower or re.search(r"\bmoe\b", lower):
+        anchors.update({"mixture", "experts", "moe"})
+    if "transformer" in lower:
+        anchors.add("transformer")
+    if re.search(r"\bhead\b|\bheads\b", lower):
+        anchors.update({"head", "heads"})
+    if "easyocr" in lower or "ocr" in lower:
+        anchors.update({"ocr", "easyocr"})
+    if "precision" in lower and "recall" in lower:
+        anchors.update({"precision", "recall"})
+    if not anchors:
+        return anchors
+    return {token for token in anchors if token not in {"the", "a", "an", "and"}}
+
+
+def _insufficient_local_grounding(*, query: str, documents: list[Document]) -> bool:
+    if not documents:
+        return True
+    anchor_terms = _anchor_terms_for_query(query)
+    if not anchor_terms:
+        return False
+    best_overlap = 0.0
+    for document in documents[:8]:
+        text = (document.page_content or "").lower()
+        best_overlap = max(best_overlap, _overlap_score(text, anchor_terms))
+    return best_overlap < 0.34
 
 
 def _phrase_overlap_score(text: str, phrases: list[str]) -> float:
@@ -2946,6 +3238,8 @@ def _select_citations_for_answer(
         selected.append(citation)
 
     if selected:
+        if mode == Mode.GLOBAL:
+            return selected[: min(2, len(selected))]
         return selected
 
     if mode == Mode.REVIEWER:

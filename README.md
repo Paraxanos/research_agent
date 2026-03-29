@@ -121,6 +121,26 @@ Open:
 
 - `http://127.0.0.1:5173/index.html`
 
+## Local Brain Smoke Test
+
+Run an end-to-end smoke test (health check, PDF upload, hard Local Brain questions, provider/fallback checks, pass/fail summary):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke_local.ps1 -PdfPath "C:\Users\R Nishanth Reddy\Downloads\EEGMoE_A_Domain-Decoupled_Mixture-of-Experts_Model_for_Self-Supervised_EEG_Representation_Learning.pdf"
+```
+
+What this script validates:
+
+- API is reachable (`/health`)
+- PDF upload works (`/api/papers/upload`)
+- Local mode answers grounded questions with citations
+- Missing facts are correctly rejected
+- Model generation is active (not retrieval-only fallback)
+
+Smoke reports are saved to:
+
+- `docs/smoke_reports/*.json`
+
 ## Configuration
 
 Key settings are defined in `backend/src/research_agent/config.py`.

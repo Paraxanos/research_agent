@@ -14,3 +14,5 @@ backend/data/papers/*
 backend/storage/*
 !backend/data/papers/.gitkeep
 !backend/storage/.gitkeep
+docs/smoke_reports/*
+!docs/smoke_reports/.gitkeep
