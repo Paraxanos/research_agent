@@ -29,6 +29,9 @@ REVIEWER_STATE_KEYS = (
     "turn_count",
     "syntheses",
     "vector_verdicts",
+    "vector_judgments",
+    "vector_reports",
+    "final_report",
     "next_speaker",
     "intervention_mode",
     "vectors_remaining",
@@ -61,8 +64,8 @@ def _prepare_mode_step(state: GraphState) -> GraphState:
             "Answer only from the retrieved paper excerpts. "
             "Do not use outside knowledge. "
             "For every factual claim, attach inline citations like [1], [2]. "
-            "For count questions, if the excerpt lists numbered entities (for example Expert 1 ... Expert 6), "
-            "infer the minimum explicit count from the highest listed index and state it as 'at least N'. "
+            "For count questions, return a single exact numeric answer when explicit evidence exists. "
+            "If the excerpt lists numbered entities (for example Expert 1 ... Expert 6), infer the explicit count as 6. "
             "If evidence is missing, respond with exactly: "
             "'This information is not in your uploaded papers.' "
             "Then briefly name what is missing and offer Global mode."
@@ -94,18 +97,10 @@ def _prepare_mode_step(state: GraphState) -> GraphState:
             "Cite factual claims with inline citations [n]."
         ),
         Mode.COMPARATOR: (
-            "You are a research analyst comparing the selected papers. "
-            "Structure responses around these five axes:\n"
-            "  1. Core contribution and claimed novelty of each paper.\n"
-            "  2. Shared benchmarks - list datasets both or all papers evaluate on "
-            "and directly compare their reported numbers.\n"
-            "  3. Methodological similarities and differences - "
-            "architecture choices, training setup, evaluation protocol.\n"
-            "  4. Relative strength - which paper is stronger and why, "
-            "with specific evidence from the text.\n"
-            "  5. Unique aspects - what each paper does that the others do not.\n"
-            "Be explicit and direct. Use paper filenames to disambiguate. "
-            "Avoid vague statements and always state the exact differences."
+            "You are a research analyst running a claim-level comparison lab. "
+            "Do not produce generic prose. Build explicit claim-to-evidence contrasts, "
+            "highlight true conflicts, and end with concrete decisions. "
+            "Use paper filenames to disambiguate every point."
         ),
     }
     debug = dict(state.get("debug", {}))
@@ -172,7 +167,8 @@ def _retrieve_comparator_hits(
     if not paper_ids:
         return []
 
-    per_paper_top_k = max(2, settings.retrieval_top_k // max(1, len(paper_ids)))
+    per_paper_top_k = max(4, settings.retrieval_top_k)
+    max_total = max(settings.retrieval_top_k * 2, len(paper_ids) * 5)
     combined: list[tuple[Document, float | None]] = []
     for paper_id in paper_ids:
         combined.extend(
@@ -193,7 +189,7 @@ def _retrieve_comparator_hits(
         if chunk_id:
             seen_chunk_ids.add(chunk_id)
         deduped.append((document, score))
-        if len(deduped) >= settings.retrieval_top_k:
+        if len(deduped) >= max_total:
             break
     return deduped
 
@@ -211,6 +207,8 @@ def _retrieve_general_hits(
     per_query_top_k = max(settings.retrieval_top_k, settings.rerank_top_n + 4)
     if mode == Mode.LOCAL:
         per_query_top_k = max(per_query_top_k, settings.retrieval_top_k * 3)
+        if _is_math_intent_query(query):
+            per_query_top_k = max(per_query_top_k, settings.retrieval_top_k * 4)
     aggregated: list[tuple[Document, float]] = []
     for index, subquery in enumerate(subqueries):
         hits = dense_retriever.retrieve(
@@ -266,6 +264,11 @@ def _general_subqueries(*, query: str, mode: Mode) -> list[str]:
         seeds.append(f"{focused or base} EEG model architecture dataset")
     if "model" in lower:
         seeds.append(f"{focused or base} proposed model name architecture")
+    if _is_math_intent_query(base):
+        seeds.append(f"{focused or base} equation equations objective loss function formula formulation")
+        seeds.append(f"{focused or base} optimization training objective regularization derivation")
+        seeds.append(f"{focused or base} notation variable definition term interpretation")
+        seeds.append(f"{focused or base} where denotes can be formulated as equation ( )")
     if mode == Mode.LOCAL:
         seeds.append(f"{focused or base} exact metric value method model version")
 
@@ -278,6 +281,24 @@ def _general_subqueries(*, query: str, mode: Mode) -> list[str]:
         seen.add(normalized)
         deduped.append(item)
     return deduped
+
+
+def _is_math_intent_query(query: str) -> bool:
+    lower = (query or "").lower()
+    markers = (
+        "math",
+        "equation",
+        "equations",
+        "formula",
+        "formulation",
+        "derivation",
+        "objective",
+        "loss",
+        "notation",
+        "term does",
+        "teach me the math",
+    )
+    return any(marker in lower for marker in markers)
 
 
 def _focused_retrieval_query(query: str) -> str:
@@ -413,15 +434,23 @@ def _retrieve_reviewer_hits(
 
 def _reviewer_subqueries(query: str) -> list[str]:
     base = (query or "").strip()
-    seeds = [
-        base,
-        f"{base} core contribution novelty claims problem setup assumptions",
-        f"{base} method architecture training objective algorithm implementation details",
-        f"{base} datasets benchmarks baselines protocol metrics statistical significance",
-        f"{base} ablation sensitivity analysis error analysis robustness",
-        f"{base} limitations failure cases threats to validity biases",
-        f"{base} reproducibility code data hyperparameters compute seeds",
-    ]
+    lower = base.lower()
+    seeds = [base]
+
+    if any(marker in lower for marker in ("novel", "contribution", "claim", "scope")):
+        seeds.append(f"{base} novelty contribution prior work delta claim support")
+    else:
+        seeds.append(f"{base} core contribution novelty claims assumptions")
+
+    if any(marker in lower for marker in ("method", "architecture", "training", "objective")):
+        seeds.append(f"{base} method architecture training objective implementation details")
+    else:
+        seeds.append(f"{base} method details algorithm design choices")
+
+    if any(marker in lower for marker in ("benchmark", "dataset", "baseline", "metric", "result", "evaluation")):
+        seeds.append(f"{base} datasets benchmarks baselines metrics protocol statistical significance")
+    else:
+        seeds.append(f"{base} evaluation evidence limitations reproducibility")
     deduped: list[str] = []
     seen: set[str] = set()
     for item in seeds:
@@ -430,6 +459,8 @@ def _reviewer_subqueries(query: str) -> list[str]:
             continue
         seen.add(normalized)
         deduped.append(item)
+        if len(deduped) >= 4:
+            break
     return deduped
 
 
@@ -454,6 +485,7 @@ def _rerank_step(state: GraphState) -> GraphState:
     query_phrases = _query_phrases(query_text)
     anchor_terms = _anchor_terms_for_query(query_text)
     focus_terms = set(_tokenize_for_overlap(" ".join(_mode_keywords(mode))))
+    math_query = mode == Mode.LOCAL and _is_math_intent_query(query_text)
     quantity_intent = any(marker in (query_text or "").lower() for marker in ("how many", "number", "count", "how much"))
     expert_count_query = quantity_intent and any(token.startswith("expert") for token in query_terms)
     person_query = mode == Mode.GLOBAL and _is_global_person_query(query_text)
@@ -481,6 +513,12 @@ def _rerank_step(state: GraphState) -> GraphState:
             marker in lower for marker in ("dataset", "baseline", "sota", "accuracy", "f1")
         ):
             section_boost += 0.10
+        if math_query and _looks_math_dense_chunk(text):
+            section_boost += 0.55
+        elif math_query and any(
+            marker in lower for marker in ("equation", "objective", "loss", "formulated as", "where")
+        ):
+            section_boost += 0.28
         if person_query and _looks_author_metadata_text(lower):
             section_boost += 0.75
         has_number_phrase = "number of experts" in lower
@@ -491,7 +529,7 @@ def _rerank_step(state: GraphState) -> GraphState:
         elif expert_count_query and has_number_phrase:
             section_boost += 0.55
 
-        quality_penalty = _low_signal_penalty(text)
+        quality_penalty = _low_signal_penalty(text, allow_numeric_dense=math_query)
         anchor_penalty = 0.0
         if anchor_terms and anchor_overlap < 0.34:
             anchor_penalty += 0.30
@@ -520,6 +558,8 @@ def _rerank_step(state: GraphState) -> GraphState:
     rerank_limit = max(1, settings.rerank_top_n)
     if mode == Mode.REVIEWER:
         rerank_limit = max(rerank_limit, 8)
+    elif mode == Mode.COMPARATOR:
+        rerank_limit = max(rerank_limit, 10)
     reranked_docs = _select_balanced_docs(mode=mode, scored_docs=scored, limit=rerank_limit)
     debug = dict(state.get("debug", {}))
     debug["reranked_count"] = len(reranked_docs)
@@ -592,6 +632,7 @@ def _draft_answer_step(state: GraphState) -> GraphState:
             }
         debate_debug = dict(debate_payload.get("debug", {}))
         debate_debug["response_stage"] = "reviewer_debate"
+        debate_debug["model_provider"] = text_service.last_provider or debate_debug.get("model_provider")
         debate_payload["debug"] = debate_debug
         return debate_payload
 
@@ -625,6 +666,18 @@ def _draft_answer_step(state: GraphState) -> GraphState:
             "citations": [],
             "debug": debug,
         }
+    if mode == Mode.LOCAL:
+        numeric_fastpath = _try_local_numeric_fastpath(
+            query=state.get("message", ""),
+            documents=documents,
+        )
+        if numeric_fastpath:
+            debug["response_stage"] = "local_numeric_fastpath"
+            return {
+                "draft_answer": numeric_fastpath,
+                "citations": state.get("citations", []),
+                "debug": debug,
+            }
 
     if not text_service.available:
         draft_answer = _fallback_without_model(state)
@@ -642,7 +695,12 @@ def _draft_answer_step(state: GraphState) -> GraphState:
     elif mode == Mode.GLOBAL and documents:
         debug["global_context_relevance"] = "high"
 
-    max_output_tokens = 2000 if mode == Mode.REVIEWER else 1400
+    if mode == Mode.REVIEWER:
+        max_output_tokens = 2000
+    elif mode == Mode.COMPARATOR:
+        max_output_tokens = 2200
+    else:
+        max_output_tokens = 1400
     try:
         draft_answer = text_service.generate(
             system_prompt=_system_prompt(state),
@@ -781,6 +839,14 @@ def _finalize_answer_step(state: GraphState) -> GraphState:
         debug["citation_warning"] = "Answer lacked inline citations after validation."
 
     citations = _select_citations_for_answer(answer=answer, citations=raw_citations, mode=mode)
+    reindexed_answer = _reindex_answer_citations(
+        answer=answer,
+        raw_citations=raw_citations,
+        selected_citations=citations,
+    )
+    if reindexed_answer != answer:
+        answer = reindexed_answer
+        debug["citation_reindexed"] = True
     debug["citation_count"] = len(citations)
     debug["response_stage"] = "finalized"
     return {
@@ -924,10 +990,7 @@ def _rate_limit_fallback_answer(state: GraphState, *, retry_hint: str) -> str:
     if mode == Mode.COMPARATOR:
         if not documents:
             return "I could not retrieve enough evidence from the selected papers."
-        return (
-            "Here are the strongest comparison excerpts from the selected papers:\n\n"
-            f"{_format_context(documents, max_docs=min(3, len(documents)))}"
-        )
+        return _comparator_structured_fallback(documents=documents)
     return (
         _local_extractive_fallback(
             query=state.get("message", ""),
@@ -938,21 +1001,120 @@ def _rate_limit_fallback_answer(state: GraphState, *, retry_hint: str) -> str:
     )
 
 
+def _comparator_structured_fallback(*, documents: list[Document]) -> str:
+    per_paper: dict[str, list[dict[str, Any]]] = {}
+    for index, document in enumerate(documents[:10], start=1):
+        metadata = document.metadata or {}
+        filename = str(metadata.get("filename", "unknown.pdf")).strip() or "unknown.pdf"
+        page = metadata.get("page")
+        snippet = _extract_signal_sentence(document.page_content or "")
+        if not snippet:
+            continue
+        per_paper.setdefault(filename, []).append(
+            {
+                "citation": index,
+                "snippet": snippet,
+                "page": page,
+            }
+        )
+    if not per_paper:
+        return "I could not retrieve enough evidence from the selected papers."
+
+    papers = list(per_paper.keys())[:3]
+    claim_lines: list[str] = []
+    method_lines: list[str] = []
+    benchmark_lines: list[str] = []
+    for filename in papers:
+        entries = per_paper.get(filename, [])
+        first = entries[0] if entries else {"citation": 1, "snippet": "No snippet."}
+        second = entries[1] if len(entries) > 1 else first
+        claim_lines.append(
+            f"- **{filename}**\n"
+            f"  - Claim signal: \"{first.get('snippet', '')}\" [{int(first.get('citation', 1))}]\n"
+            f"  - Evidence signal: \"{second.get('snippet', '')}\" [{int(second.get('citation', 1))}]"
+        )
+        method_lines.append(
+            f"- **{filename}**: method details are partially available from retrieved snippets; prioritize full-text comparison after model recovery [{int(first.get('citation', 1))}]."
+        )
+        benchmark_lines.append(
+            f"- **{filename}**: benchmark overlap cannot be fully verified from fallback snippets alone [{int(first.get('citation', 1))}]."
+        )
+
+    conflict_lines: list[str] = []
+    if len(papers) >= 2:
+        p1 = papers[0]
+        p2 = papers[1]
+        s1 = str(per_paper[p1][0].get("snippet", "")).lower()
+        s2 = str(per_paper[p2][0].get("snippet", "")).lower()
+        overlap = _overlap_score(s1, set(_tokenize_for_overlap(s2)))
+        if overlap >= 0.28:
+            conflict_lines.append(
+                f"- Agreement signal: {p1} and {p2} appear to optimize similar goals in retrieved passages [{int(per_paper[p1][0].get('citation', 1))}][{int(per_paper[p2][0].get('citation', 1))}]."
+            )
+        else:
+            conflict_lines.append(
+                f"- Non-overlap signal: {p1} and {p2} target different problem framings in the retrieved passages [{int(per_paper[p1][0].get('citation', 1))}][{int(per_paper[p2][0].get('citation', 1))}]."
+            )
+        conflict_lines.append("- Contradictions: not confidently detectable in retrieval-only fallback; abstaining.")
+    else:
+        conflict_lines.append("- Need at least two papers for conflict mapping.")
+
+    use_case_lines: list[str] = []
+    if papers:
+        use_case_lines.append(f"- If you need strongest available evidence in current snippets: prefer **{papers[0]}** [{int(per_paper[papers[0]][0].get('citation', 1))}].")
+    if len(papers) > 1:
+        use_case_lines.append(f"- If your task aligns with the second paper framing: prefer **{papers[1]}** [{int(per_paper[papers[1]][0].get('citation', 1))}].")
+    use_case_lines.append("- For publication-grade decisions, rerun after model recovery to resolve benchmark and novelty ties.")
+
+    return (
+        "## Papers Compared\n"
+        + "\n".join(f"- {paper}" for paper in papers)
+        + "\n\n## Claim Matrix\n"
+        + "\n".join(claim_lines)
+        + "\n\n## Conflict Map\n"
+        + "\n".join(conflict_lines)
+        + "\n\n## Benchmark Verdict Matrix\n"
+        + "\n".join(benchmark_lines)
+        + "\n\n## Method Trade-offs\n"
+        + "\n".join(method_lines)
+        + "\n\n## Synthesis Blueprint\n"
+        + "- Merge plan: combine the strongest methodological element from each selected paper and evaluate on one shared metric once full model generation is back.\n"
+        + "- Blocking risk: fallback mode cannot reliably infer full benchmark comparability.\n"
+        + "\n\n## Decision By Use Case\n"
+        + "\n".join(use_case_lines)
+    )
+
+
+def _extract_signal_sentence(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (text or "")).strip()
+    if not cleaned:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+    for sentence in sentences:
+        snippet = sentence.strip()
+        if len(snippet) < 40:
+            continue
+        if _looks_like_reference_snippet(snippet):
+            continue
+        return snippet[:260]
+    return cleaned[:260]
+
+
 def _local_extractive_fallback(*, query: str, documents: list[Document]) -> str:
     query_terms = set(_tokenize_for_overlap(query))
     query_phrases = _query_phrases(query)
     lower_query = (query or "").lower()
-    quantity_intent = any(marker in lower_query for marker in ("how many", "number", "count", "how much"))
+    quantity_intent = _is_quantity_intent_query(query)
     if quantity_intent and any(token.startswith("expert") for token in query_terms):
-        quantity_snippet = _extract_quantity_snippet(documents=documents, keyword="expert")
+        quantity_snippet, citation_index = _extract_quantity_snippet(documents=documents, keyword="expert")
         if quantity_snippet:
             expert_count = _infer_expert_count(quantity_snippet)
             if expert_count is not None:
                 return (
                     "Based on the uploaded paper: "
-                    f"at least {expert_count} experts are explicitly described. {quantity_snippet} [1]"
+                    f"the paper uses {expert_count} experts. {quantity_snippet} [{citation_index}]"
                 )
-            return f"Based on the uploaded paper: {quantity_snippet} [1]"
+            return f"Based on the uploaded paper: {quantity_snippet} [{citation_index}]"
         return (
             "This information is not in your uploaded papers. "
             "The retrieved context discusses mixture-of-experts concepts but does not provide a clear numeric expert count."
@@ -993,6 +1155,51 @@ def _local_extractive_fallback(*, query: str, documents: list[Document]) -> str:
     return f"Based on the uploaded paper: {cleaned_best} [1]"
 
 
+def _try_local_numeric_fastpath(*, query: str, documents: list[Document]) -> str | None:
+    if not documents:
+        return None
+    if not _is_quantity_intent_query(query):
+        return None
+
+    lower_query = (query or "").lower()
+    keyword = "expert"
+    if "participant" in lower_query:
+        keyword = "participant"
+    elif "player" in lower_query:
+        keyword = "player"
+    elif "subject" in lower_query:
+        keyword = "subject"
+    elif re.search(r"\bhead\b|\bheads\b", lower_query):
+        keyword = "head"
+
+    snippet, citation_index = _extract_quantity_snippet(documents=documents, keyword=keyword)
+    if not snippet:
+        return None
+
+    count = _extract_keyword_count(snippet=snippet, keyword=keyword)
+    if count is None and keyword != "expert":
+        count = _extract_keyword_count(snippet=snippet, keyword="expert")
+        if count is not None:
+            keyword = "expert"
+    if count is None:
+        return None
+
+    if _is_just_number_request(query):
+        return f"{count} [{citation_index}]"
+
+    if keyword == "expert":
+        return f"The paper uses {count} experts. [{citation_index}]"
+    if keyword == "participant":
+        return f"The paper uses {count} participants. [{citation_index}]"
+    if keyword == "player":
+        return f"The paper uses {count} players. [{citation_index}]"
+    if keyword == "subject":
+        return f"The paper uses {count} subjects. [{citation_index}]"
+    if keyword == "head":
+        return f"The paper uses {count} transformer heads. [{citation_index}]"
+    return f"The paper reports {count}. [{citation_index}]"
+
+
 def _looks_like_reference_snippet(text: str) -> bool:
     lower = (text or "").lower()
     markers = (
@@ -1012,8 +1219,36 @@ def _looks_like_reference_snippet(text: str) -> bool:
     return False
 
 
-def _extract_quantity_snippet(*, documents: list[Document], keyword: str) -> str:
-    for document in documents[:6]:
+def _looks_like_non_argument_snippet(text: str) -> bool:
+    lower = re.sub(r"\s+", " ", (text or "").lower()).strip()
+    if not lower:
+        return True
+    junk_markers = (
+        "frame-level video-based temporal analysis of fps gameplay without telemetry",
+        "start of trial",
+        "score =",
+        "figure ",
+        "table ",
+        "(a)",
+        "(b)",
+        "(c)",
+        "copyrights for components of this work",
+        "no personally identifiable information",
+    )
+    if any(marker in lower for marker in junk_markers):
+        return True
+    if re.match(r"^[\(\[]?[a-z0-9][\)\]]?\s", lower) and len(lower.split()) <= 8:
+        return True
+    if len(lower) < 45:
+        return True
+    return False
+
+
+def _extract_quantity_snippet(*, documents: list[Document], keyword: str) -> tuple[str, int]:
+    best_score = float("-inf")
+    best_snippet = ""
+    best_citation = 1
+    for doc_index, document in enumerate(documents[:8], start=1):
         text = (document.page_content or "").strip()
         if not text:
             continue
@@ -1028,27 +1263,71 @@ def _extract_quantity_snippet(*, documents: list[Document], keyword: str) -> str
                 continue
             if _looks_like_reference_snippet(snippet):
                 continue
+            score = 0.0
             if re.search(rf"\b\d+\s+{re.escape(keyword)}s?\b", lower):
-                return snippet
+                score += 1.0
+            if re.search(rf"\bnumber of {re.escape(keyword)}s?\b", lower):
+                score += 0.9
             if re.search(rf"\b{re.escape(keyword)}s?\s*(?:is|are|were|was|=|:)?\s*\d+\b", lower):
-                return snippet
-            if keyword == "expert" and "expert" in lower:
-                if re.search(r"\b\d+\b", lower):
-                    return snippet
-    return ""
+                score += 1.0
+            if keyword == "expert":
+                if _has_numbered_expert_pattern(lower):
+                    score += 1.1
+                if _infer_expert_count(snippet) is not None:
+                    score += 0.6
+            if re.search(r"\b\d+\b", lower):
+                score += 0.25
+            score -= min(0.25, _low_signal_penalty(snippet))
+            if score > best_score:
+                best_score = score
+                best_snippet = snippet
+                best_citation = doc_index
+    if best_score < 0.45:
+        return "", 1
+    return best_snippet, best_citation
+
+
+def _extract_keyword_count(*, snippet: str, keyword: str) -> int | None:
+    lower = (snippet or "").lower()
+    if keyword == "expert":
+        return _infer_expert_count(snippet)
+
+    candidates: list[int] = []
+    for pattern in (
+        rf"\b(\d+)\s+{re.escape(keyword)}s?\b",
+        rf"\b{re.escape(keyword)}s?\s*(?:is|are|were|was|=|:)?\s*(\d+)\b",
+        rf"\bnumber of {re.escape(keyword)}s?\s*(?:is|:)?\s*(\d+)\b",
+    ):
+        candidates.extend(int(value) for value in re.findall(pattern, lower))
+    if not candidates:
+        return None
+    return max(candidates)
+
+
+def _is_quantity_intent_query(query: str) -> bool:
+    lower = (query or "").lower()
+    return any(marker in lower for marker in ("how many", "number", "count", "how much"))
+
+
+def _is_just_number_request(query: str) -> bool:
+    lower = (query or "").lower()
+    markers = ("just number", "only number", "number only", "thats it", "that's it", "just give number")
+    return any(marker in lower for marker in markers)
 
 
 def _infer_expert_count(snippet: str) -> int | None:
     text = (snippet or "").lower()
     if "expert" not in text:
         return None
-    values = [int(value) for value in re.findall(r"\b\d+\b", text)]
+    values: list[int] = []
+    values.extend(int(value) for value in re.findall(r"\bexpert\s+(\d+)\b", text))
+    values.extend(int(value) for value in re.findall(r"\bexperts?\s*(?:\(|:)?\s*(\d+)\b", text))
+    for match in re.finditer(r"\bexperts?\s+([0-9,\sand]+)", text):
+        values.extend(int(value) for value in re.findall(r"\d+", match.group(1)))
+    values = [value for value in values if value > 0]
     if not values:
         return None
-    high = max(values)
-    if high <= 0:
-        return None
-    return high
+    return max(values)
 
 
 def _has_numbered_expert_pattern(text: str) -> bool:
@@ -1081,18 +1360,22 @@ def _reviewer_rate_limit_fallback(state: GraphState, *, retry_hint: str) -> str:
     }
     quote = active.get("quote", _default_quote(documents))
     return (
-        "## Reviewer Arena\n"
-        f"Active Vector: {active.get('id', 'V1')} - {active.get('claim', '')}\n"
-        f"Quote Trigger: \"{quote}\"\n\n"
+        "## Claim Trial Engine\n"
+        f"Active Claim: {active.get('id', 'V1')} - {active.get('claim', '')}\n"
+        f"Claim Trigger: \"{quote}\"\n\n"
         "### Skeptic\n"
         "- Concern: evidence may be weaker than framing suggests [1].\n"
         "- Ask for a tighter quantitative comparison and clearer scope boundary [1].\n\n"
         "### Advocate\n"
         "- Defense: the paper does provide partial evidence for the claim [1].\n"
         "- Recommend narrowing claim language to what is directly demonstrated [1].\n\n"
-        "### Action Card\n"
+        "### Evidence-only Judge\n"
+        "- Verdict: contested\n"
+        "- Rationale: evidence partially supports feasibility but does not fully settle novelty strength [1].\n\n"
+        "### Rewrite Compiler Card\n"
         "Target Section: contribution framing paragraph\n"
-        "Rewrite Instruction: revise the contribution claim to include one concrete metric/baseline comparison and explicitly state the scope limits.\n"
+        "Target Claim: contribution-level novelty statement\n"
+        "Patch Instruction: revise the contribution claim to include one concrete metric/baseline comparison and explicitly state the scope limits.\n"
         "Why: this preserves strengths while reducing overclaim risk.\n\n"
         "Intervention: ask either reviewer to sharpen evidence or move to the next vector."
     )
@@ -1112,7 +1395,10 @@ def _validation_system_prompt(mode: Mode) -> str:
             "Do not mark benchmarks/ablations as missing when context shows they are covered; relabel as covered with caveats if needed. "
             "Ensure the output preserves reviewer structure, concrete actionable feedback, and complete score block."
         ),
-        Mode.COMPARATOR: "Keep only comparisons directly supported by retrieved context blocks.",
+        Mode.COMPARATOR: (
+            "Keep only comparisons directly supported by retrieved context blocks. "
+            "Preserve comparator section structure and abstain where evidence is insufficient."
+        ),
     }[mode]
     return (
         "You are a factual validator for research answers.\n"
@@ -1292,6 +1578,41 @@ def _draft_user_prompt(
             f"{context_text}"
         )
 
+    if mode == Mode.COMPARATOR:
+        paper_list = _comparator_paper_list(documents)
+        return (
+            "You are producing a deep, decision-useful comparison of selected papers.\n"
+            "Requirements:\n"
+            "- Cover ALL selected papers explicitly by filename.\n"
+            "- Keep comparisons concrete and evidence-backed; cite grounded claims with [n].\n"
+            "- Do not claim shared benchmarks unless the retrieved context proves they overlap.\n"
+            "- If no shared benchmark appears, state that clearly instead of guessing.\n"
+            "- Be specific: include exact metrics/datasets/method names when available.\n"
+            "- If evidence for a requested comparison axis is weak, abstain explicitly.\n"
+            "- Output in markdown with EXACT sections:\n"
+            "  1) ## Papers Compared\n"
+            "  2) ## Claim Matrix\n"
+            "  3) ## Conflict Map\n"
+            "  4) ## Benchmark Verdict Matrix\n"
+            "  5) ## Method Trade-offs\n"
+            "  6) ## Synthesis Blueprint\n"
+            "  7) ## Decision By Use Case\n"
+            "- In `## Claim Matrix`, give 2 strongest claims per paper with direct evidence.\n"
+            "- In `## Conflict Map`, separate `Agreements`, `Contradictions`, and `Non-overlap`.\n"
+            "- In `## Benchmark Verdict Matrix`, score each paper (1-10) on novelty, empirical rigor, and reproducibility with one-line justification.\n"
+            "- In `## Synthesis Blueprint`, specify what to borrow from each paper and one concrete merged experiment.\n"
+            "- In `## Decision By Use Case`, include at least 3 concrete scenarios and a clear winner for each.\n"
+            "- If user message is short (for example 'compare'), still deliver full depth.\n\n"
+            "Selected papers:\n"
+            f"{paper_list}\n\n"
+            "Conversation history:\n"
+            f"{history_text}\n\n"
+            "User message:\n"
+            f"{message}\n\n"
+            "Retrieved context:\n"
+            f"{context_text}"
+        )
+
     return (
         "You are producing a first-draft response.\n"
         "Requirements:\n"
@@ -1307,6 +1628,22 @@ def _draft_user_prompt(
     )
 
 
+def _comparator_paper_list(documents: list[Document]) -> str:
+    seen: set[str] = set()
+    labels: list[str] = []
+    for document in documents:
+        filename = str((document.metadata or {}).get("filename", "")).strip()
+        if not filename or filename in seen:
+            continue
+        seen.add(filename)
+        labels.append(filename)
+        if len(labels) >= 3:
+            break
+    if not labels:
+        return "- Unknown papers from retrieved context"
+    return "\n".join(f"- {label}" for label in labels)
+
+
 def _run_reviewer_debate(state: GraphState) -> GraphState:
     raw_message = str(state.get("message", ""))
     message = _normalize_reviewer_message(raw_message)
@@ -1317,6 +1654,9 @@ def _run_reviewer_debate(state: GraphState) -> GraphState:
     debate_summary = str(state.get("debate_summary", "")).strip()
     syntheses = deepcopy(state.get("syntheses", {}))
     vector_verdicts = deepcopy(state.get("vector_verdicts", {}))
+    vector_judgments = deepcopy(state.get("vector_judgments", {}))
+    vector_reports = deepcopy(state.get("vector_reports", {}))
+    final_report = deepcopy(state.get("final_report", {}))
     attack_vectors = _normalize_attack_vectors(
         state.get("attack_vectors", []),
         fallback_count=settings.reviewer_attack_vector_count,
@@ -1327,6 +1667,9 @@ def _run_reviewer_debate(state: GraphState) -> GraphState:
         debate_summary = ""
         syntheses = {}
         vector_verdicts = {}
+        vector_judgments = {}
+        vector_reports = {}
+        final_report = {}
         debug["reviewer_session_reset"] = True
 
     if not attack_vectors:
@@ -1354,14 +1697,15 @@ def _run_reviewer_debate(state: GraphState) -> GraphState:
         ]
 
     attack_vector_ids = [str(item.get("id", "")).strip() for item in attack_vectors if str(item.get("id", "")).strip()]
+    completed_session = bool(final_report) and bool(attack_vector_ids) and len(syntheses) >= len(attack_vector_ids)
     vectors_remaining = [
         vector_id
         for vector_id in state.get("vectors_remaining", [])
         if vector_id in attack_vector_ids and vector_id not in syntheses
     ]
-    if not vectors_remaining:
+    if not vectors_remaining and not completed_session:
         vectors_remaining = [vector_id for vector_id in attack_vector_ids if vector_id not in syntheses]
-    if not vectors_remaining:
+    if not vectors_remaining and not completed_session:
         vectors_remaining = attack_vector_ids[:]
 
     if _user_requested_next_vector(message):
@@ -1373,6 +1717,8 @@ def _run_reviewer_debate(state: GraphState) -> GraphState:
     if explicit_vector and explicit_vector in syntheses:
         syntheses.pop(explicit_vector, None)
         vector_verdicts.pop(explicit_vector, None)
+        vector_judgments.pop(explicit_vector, None)
+        vector_reports.pop(explicit_vector, None)
         if explicit_vector not in vectors_remaining:
             vectors_remaining.insert(0, explicit_vector)
 
@@ -1408,6 +1754,7 @@ def _run_reviewer_debate(state: GraphState) -> GraphState:
             active_vector=active_vector,
             resolution=resolution,
             vector_verdicts=vector_verdicts,
+            vector_judgments=vector_judgments,
             debate_history=debate_history,
             documents=documents,
         )
@@ -1433,7 +1780,54 @@ def _run_reviewer_debate(state: GraphState) -> GraphState:
             "turn_count": turn_count,
             "syntheses": syntheses,
             "vector_verdicts": vector_verdicts,
+            "vector_judgments": vector_judgments,
+            "vector_reports": vector_reports,
+            "final_report": final_report,
             "next_speaker": state.get("next_speaker", "skeptic"),
+            "intervention_mode": intervention_mode,
+            "vectors_remaining": vectors_remaining,
+            "debug": debug,
+        }
+
+    # If this session already completed all vectors, keep returning the complete report.
+    if not vectors_remaining and isinstance(final_report, dict) and final_report:
+        answer = _render_reviewer_debate(
+            attack_vectors=attack_vectors,
+            active_vector=active_vector,
+            vectors_remaining=vectors_remaining,
+            syntheses=syntheses,
+            vector_verdicts=vector_verdicts,
+            vector_judgments=vector_judgments,
+            vector_reports=vector_reports,
+            current_vector_report={},
+            final_report=final_report,
+            round_events=[],
+            debate_history=debate_history,
+            debate_summary=debate_summary,
+            resolution=resolution,
+            turn_count=turn_count,
+            next_speaker="user",
+        )
+        debug["reviewer_debate_mode"] = True
+        debug["response_stage"] = "reviewer_complete_report"
+        debug["final_report_ready"] = True
+        return {
+            "draft_answer": answer,
+            "citations": state.get("citations", []),
+            "attack_vectors": attack_vectors,
+            "active_vector_id": active_vector_id,
+            "debate_history": debate_history,
+            "debate_summary": debate_summary,
+            "skeptic_position": skeptic_position,
+            "advocate_position": advocate_position,
+            "resolution": resolution,
+            "turn_count": turn_count,
+            "syntheses": syntheses,
+            "vector_verdicts": vector_verdicts,
+            "vector_judgments": vector_judgments,
+            "vector_reports": vector_reports,
+            "final_report": final_report,
+            "next_speaker": "user",
             "intervention_mode": intervention_mode,
             "vectors_remaining": vectors_remaining,
             "debug": debug,
@@ -1459,9 +1853,19 @@ def _run_reviewer_debate(state: GraphState) -> GraphState:
     next_speaker = str(state.get("next_speaker", "skeptic")).strip().lower() or "skeptic"
     if _is_new_reviewer_session_signal(raw_message):
         next_speaker = "skeptic"
-    loops = max(1, settings.reviewer_turns_per_response)
+    # Complete-panel mode: run the full multi-vector debate in one call.
+    total_vectors = max(1, len(vectors_remaining))
+    loops = max(
+        2,
+        settings.reviewer_max_turns * total_vectors * 2,
+        settings.reviewer_turns_per_response,
+    )
     for _ in range(loops):
         turn_count = _count_vector_turns(debate_history, active_vector_id)
+        if turn_count >= 4:
+            next_speaker = "synthesise"
+        else:
+            next_speaker = str(next_speaker or "").strip().lower() or "skeptic"
         skeptic_position = _latest_speaker_content(debate_history, speaker="skeptic", vector_id=active_vector_id)
         advocate_position = _latest_speaker_content(debate_history, speaker="advocate", vector_id=active_vector_id)
         resolution = _infer_resolution(
@@ -1471,26 +1875,38 @@ def _run_reviewer_debate(state: GraphState) -> GraphState:
             active_vector_id=active_vector_id,
             turn_count=turn_count,
         )
-        next_speaker = _route_reviewer_turn(
-            history=debate_history,
-            active_vector_id=active_vector_id,
-            resolution=resolution,
-            turn_count=turn_count,
-            fallback=next_speaker,
-        )
+        if next_speaker != "synthesise":
+            next_speaker = _route_reviewer_turn(
+                history=debate_history,
+                active_vector_id=active_vector_id,
+                resolution=resolution,
+                turn_count=turn_count,
+                fallback=next_speaker,
+            )
 
         if next_speaker == "user":
             break
         if next_speaker == "synthesise":
-            verdict = _compute_vector_verdict(
+            judgment = _run_evidence_only_judge(
                 active_vector=active_vector,
                 debate_history=debate_history,
                 resolution=resolution,
+                documents=documents,
             )
+            verdict = str(judgment.get("verdict", "contested"))
             vector_verdicts[active_vector_id] = verdict
+            vector_judgments[active_vector_id] = judgment
+            round_events.append(
+                {
+                    "speaker": "judge",
+                    "content": _render_judge_card(active_vector_id=active_vector_id, judgment=judgment),
+                    "vector_id": active_vector_id,
+                }
+            )
             synthesis = _synthesise_vector(
                 active_vector=active_vector,
                 verdict=verdict,
+                judgment=judgment,
                 debate_history=debate_history,
                 documents=documents,
             )
@@ -1550,24 +1966,48 @@ def _run_reviewer_debate(state: GraphState) -> GraphState:
         active_vector_id=active_vector_id,
         turn_count=turn_count,
     )
-    next_speaker = _route_reviewer_turn(
-        history=debate_history,
-        active_vector_id=active_vector_id,
-        resolution=resolution,
-        turn_count=turn_count,
-        fallback=next_speaker,
+    if turn_count >= 4:
+        next_speaker = "synthesise"
+    else:
+        next_speaker = _route_reviewer_turn(
+            history=debate_history,
+            active_vector_id=active_vector_id,
+            resolution=resolution,
+            turn_count=turn_count,
+            fallback=next_speaker,
+        )
+    current_vector_report = _build_current_vector_report(
+        active_vector=active_vector,
+        skeptic_position=skeptic_position,
+        advocate_position=advocate_position,
+        debate_history=debate_history,
+        documents=documents,
+        existing_report=vector_reports.get(active_vector_id, {}),
     )
+    if current_vector_report:
+        vector_reports[active_vector_id] = current_vector_report
 
     if next_speaker == "synthesise":
-        verdict = _compute_vector_verdict(
+        judgment = _run_evidence_only_judge(
             active_vector=active_vector,
             debate_history=debate_history,
             resolution=resolution,
+            documents=documents,
         )
+        verdict = str(judgment.get("verdict", "contested"))
         vector_verdicts[active_vector_id] = verdict
+        vector_judgments[active_vector_id] = judgment
+        round_events.append(
+            {
+                "speaker": "judge",
+                "content": _render_judge_card(active_vector_id=active_vector_id, judgment=judgment),
+                "vector_id": active_vector_id,
+            }
+        )
         synthesis = _synthesise_vector(
             active_vector=active_vector,
             verdict=verdict,
+            judgment=judgment,
             debate_history=debate_history,
             documents=documents,
         )
@@ -1598,12 +2038,29 @@ def _run_reviewer_debate(state: GraphState) -> GraphState:
             next_speaker = "user"
 
     debate_history = debate_history[-64:]
+    if not vectors_remaining and syntheses:
+        if not isinstance(final_report, dict) or not final_report:
+            final_report = _build_reviewer_final_report(
+                attack_vectors=attack_vectors,
+                vector_verdicts=vector_verdicts,
+                vector_judgments=vector_judgments,
+                vector_reports=vector_reports,
+                syntheses=syntheses,
+                debate_history=debate_history,
+                documents=documents,
+            )
+    else:
+        final_report = {}
     answer = _render_reviewer_debate(
         attack_vectors=attack_vectors,
         active_vector=active_vector,
         vectors_remaining=vectors_remaining,
         syntheses=syntheses,
         vector_verdicts=vector_verdicts,
+        vector_judgments=vector_judgments,
+        vector_reports=vector_reports,
+        current_vector_report=current_vector_report,
+        final_report=final_report,
         round_events=round_events,
         debate_history=debate_history,
         debate_summary=debate_summary,
@@ -1621,7 +2078,26 @@ def _run_reviewer_debate(state: GraphState) -> GraphState:
     debug["next_speaker"] = next_speaker
     debug["vectors_remaining"] = vectors_remaining[:]
     debug["round_speakers"] = [str(item.get("speaker", "")) for item in round_events]
+    debug["round_events"] = [
+        {
+            "speaker": str(item.get("speaker", "")).strip().lower(),
+            "vector_id": str(item.get("vector_id", "")).strip(),
+            "turn": int(item.get("turn", 0) or 0),
+            "content": _compact_turn_text(str(item.get("content", "")), max_chars=520),
+        }
+        for item in round_events
+        if str(item.get("speaker", "")).strip().lower() in {"skeptic", "advocate", "judge", "synthesise"}
+    ]
+    if isinstance(final_report, dict) and final_report and not vectors_remaining:
+        debug["round_events"] = []
+    debug["round_event_count"] = len(debug["round_events"])
     debug["vector_verdicts"] = vector_verdicts
+    debug["vector_judgments"] = vector_judgments
+    if current_vector_report:
+        debug["current_vector_report"] = current_vector_report
+    debug["final_report_ready"] = bool(final_report)
+    if final_report:
+        debug["final_report"] = final_report
     if turn_count >= settings.reviewer_warning_turn:
         debug["turn_warning"] = "debate_closing"
 
@@ -1638,6 +2114,9 @@ def _run_reviewer_debate(state: GraphState) -> GraphState:
         "turn_count": turn_count,
         "syntheses": syntheses,
         "vector_verdicts": vector_verdicts,
+        "vector_judgments": vector_judgments,
+        "vector_reports": vector_reports,
+        "final_report": final_report,
         "next_speaker": next_speaker,
         "intervention_mode": intervention_mode,
         "vectors_remaining": vectors_remaining,
@@ -1993,7 +2472,10 @@ def _route_reviewer_turn(
 
     last_meta = _last_route_meta(history, active_vector_id)
     if last_meta.get("addressed_to") == "user":
-        return "user"
+        if turn_count >= max(3, settings.reviewer_warning_turn - 1):
+            return "synthesise"
+        previous = _last_non_user_speaker(history, active_vector_id)
+        return "advocate" if previous == "skeptic" else "skeptic"
     if last_meta.get("addressed_to") in {"advocate", "skeptic"}:
         return str(last_meta.get("addressed_to"))
 
@@ -2006,7 +2488,7 @@ def _route_reviewer_turn(
         return "synthesise"
 
     if _is_deadlock(history, active_vector_id):
-        return "user"
+        return "synthesise"
 
     skeptic_turns = _speaker_turn_count(history, "skeptic", active_vector_id)
     advocate_turns = _speaker_turn_count(history, "advocate", active_vector_id)
@@ -2080,6 +2562,8 @@ def _infer_resolution(
     if _speaker_conceded(skeptic_position, "skeptic"):
         return "resolved"
     if _is_deadlock(history, active_vector_id):
+        if turn_count >= max(4, settings.reviewer_warning_turn - 1):
+            return "force_closed"
         return "deadlocked"
     return "open"
 
@@ -2120,7 +2604,18 @@ def _is_deadlock(history: list[dict[str, Any]], vector_id: str) -> bool:
         return False
     skeptic_unchanged = _normalize_turn_text(skeptic_turns[0]) == _normalize_turn_text(skeptic_turns[1])
     advocate_unchanged = _normalize_turn_text(advocate_turns[0]) == _normalize_turn_text(advocate_turns[1])
-    return skeptic_unchanged and advocate_unchanged
+    if skeptic_unchanged and advocate_unchanged:
+        return True
+
+    skeptic_similarity = _turn_similarity_score(skeptic_turns[0], skeptic_turns[1])
+    advocate_similarity = _turn_similarity_score(advocate_turns[0], advocate_turns[1])
+    if skeptic_similarity >= 0.88 and advocate_similarity >= 0.88:
+        return True
+    if skeptic_similarity >= 0.94 and advocate_similarity >= 0.80:
+        return True
+    if advocate_similarity >= 0.94 and skeptic_similarity >= 0.80:
+        return True
+    return False
 
 
 def _last_n_speaker_turns(
@@ -2150,6 +2645,18 @@ def _normalize_turn_text(text: str) -> str:
     return condensed[:240]
 
 
+def _turn_similarity_score(first: str, second: str) -> float:
+    first_tokens = set(_tokenize_for_overlap(first))
+    second_tokens = set(_tokenize_for_overlap(second))
+    if not first_tokens or not second_tokens:
+        return 0.0
+    overlap = len(first_tokens & second_tokens)
+    union = len(first_tokens | second_tokens)
+    if union <= 0:
+        return 0.0
+    return overlap / union
+
+
 def _looks_like_score_request(message: str) -> bool:
     lower = (message or "").strip().lower()
     if not lower:
@@ -2173,6 +2680,7 @@ def _reviewer_score_response(
     active_vector: dict[str, Any],
     resolution: str,
     vector_verdicts: dict[str, str],
+    vector_judgments: dict[str, dict[str, Any]],
     debate_history: list[dict[str, Any]],
     documents: list[Document],
 ) -> str:
@@ -2200,6 +2708,7 @@ def _reviewer_score_response(
                 f"Active vector: {active_vector.get('id', 'V?')} - {active_vector.get('claim', '')}\n"
                 f"Resolution: {resolution}\n"
                 f"Vector verdicts: {json.dumps(vector_verdicts)}\n"
+                f"Judge cards: {json.dumps(vector_judgments)}\n"
                 "Debate excerpt:\n"
                 f"{_format_vector_history(debate_history=debate_history, vector_id=str(active_vector.get('id','')), max_turns=6)}\n\n"
                 "Context:\n"
@@ -2261,12 +2770,6 @@ def _generate_reviewer_turn(
     debate_history: list[dict[str, Any]],
     documents: list[Document],
 ) -> tuple[str, dict[str, Any]]:
-    persona = "Reviewer B (Skeptic)" if speaker == "skeptic" else "Reviewer A (Advocate)"
-    mission = (
-        "You are unconvinced. You require numerical or concrete evidence and you do not accept vague qualitative defenses."
-        if speaker == "skeptic"
-        else "You defend the paper charitably using strongest available evidence and explicit scope constraints."
-    )
     history_excerpt = _format_vector_history(
         debate_history=debate_history,
         vector_id=str(active_vector.get("id", "")),
@@ -2277,44 +2780,287 @@ def _generate_reviewer_turn(
         active_vector=active_vector,
         objective=objective,
     )
-    prompt = (
-        f"Active vector: {active_vector.get('id', 'V?')} | {active_vector.get('claim', '')}\n"
-        f"Severity: {active_vector.get('severity', 'medium')} | Category: {active_vector.get('category', 'method')}\n"
-        f"Quoted claim trigger: \"{active_vector.get('quote', '')}\"\n"
-        f"Skeptic lead-in: {active_vector.get('skeptic_lead', '')}\n"
-        f"User objective: {objective or 'General full-paper review'}\n\n"
-        "Debate summary (compressed memory):\n"
-        f"{debate_summary or 'No summary yet.'}\n\n"
-        "Most recent turns:\n"
-        f"{history_excerpt}\n\n"
-        "Retrieved context:\n"
-        f"{_format_context(turn_docs, max_docs=3)}\n\n"
-        "Reply as this reviewer only. Use citations [n] when factual.\n"
-        "Output format:\n"
-        "Position: <single sentence stance>\n"
-        "Argument: <2-4 concise bullets or short paragraphs>\n"
-        "Routing footer JSON (single line):\n"
-        'ROUTE_JSON: {"addressed_to":"advocate|skeptic|user|none","concession":true|false,"confidence":0.0}'
+    evidence_pack = _build_vector_evidence_pack(
+        active_vector=active_vector,
+        documents=turn_docs,
+        limit=3,
     )
-    try:
-        response = text_service.generate(
-            system_prompt=(
-                f"You are {persona}. {mission}\n"
-                "You are in a live two-reviewer debate. Directly respond to the opposing argument and avoid monologue."
-            ),
-            user_prompt=prompt,
-            temperature=0.1,
-            max_output_tokens=360,
+    if speaker == "advocate" and len(evidence_pack) > 1:
+        evidence_pack = evidence_pack[1:] + evidence_pack[:1]
+    previous_same_speaker = _latest_speaker_content(
+        debate_history,
+        speaker=speaker,
+        vector_id=str(active_vector.get("id", "")),
+    )
+    opponent_speaker = "advocate" if speaker == "skeptic" else "skeptic"
+    opponent_latest = _latest_speaker_content(
+        debate_history,
+        speaker=opponent_speaker,
+        vector_id=str(active_vector.get("id", "")),
+    )
+    vector_id = str(active_vector.get("id", ""))
+    speaker_turn_number = _speaker_turn_count(debate_history, speaker, vector_id) + 1
+    deterministic = _deterministic_reviewer_turn(
+        speaker=speaker,
+        active_vector=active_vector,
+        evidence_pack=evidence_pack,
+        opponent_turn=opponent_latest,
+        speaker_turn_number=speaker_turn_number,
+        debate_summary=debate_summary,
+        history_excerpt=history_excerpt,
+    )
+    deduped = _reduce_reviewer_repetition(
+        speaker=speaker,
+        turn_text=deterministic,
+        previous_turn=previous_same_speaker,
+        active_vector=active_vector,
+        evidence_pack=evidence_pack,
+    )
+    grounded = _enforce_grounded_reviewer_turn(
+        speaker=speaker,
+        turn_text=deduped,
+        active_vector=active_vector,
+        evidence_pack=evidence_pack,
+        opponent_turn=opponent_latest,
+    )
+    return grounded, {
+        "addressed_to": "advocate" if speaker == "skeptic" else "skeptic",
+        "concession": False,
+        "confidence": 0.66,
+    }
+
+
+def _deterministic_reviewer_turn(
+    *,
+    speaker: str,
+    active_vector: dict[str, Any],
+    evidence_pack: list[dict[str, Any]],
+    opponent_turn: str,
+    speaker_turn_number: int,
+    debate_summary: str,
+    history_excerpt: str,
+) -> str:
+    primary = evidence_pack[0] if evidence_pack else {}
+    secondary = evidence_pack[1] if len(evidence_pack) > 1 else primary
+    p_text = _compact_turn_text(str(primary.get("snippet", "")).strip() or str(active_vector.get("quote", "")), max_chars=200)
+    s_text = _compact_turn_text(str(secondary.get("snippet", "")).strip() or p_text, max_chars=200)
+    p_cite = int(primary.get("citation_index", 1)) if primary else 1
+    s_cite = int(secondary.get("citation_index", 1)) if secondary else p_cite
+    category = str(active_vector.get("category", "method")).strip().lower()
+    opponent_short = _extract_opponent_position(opponent_turn) or _compact_turn_text(
+        opponent_turn or "No direct opposing argument yet.",
+        max_chars=160,
+    )
+    opponent_gap = _extract_opponent_gap(opponent_turn)
+
+    skeptic_openers = [
+        "Position: Evidence supports feasibility, but claim strength still exceeds what is directly shown.",
+        "Position: The current claim remains under-justified relative to the evidence presented.",
+        "Position: The paper is promising, yet the claim framing is still too broad for the reported support.",
+    ]
+    advocate_openers = [
+        "Position: The claim is defensible when explicitly bounded to reported evidence and scope.",
+        "Position: The paper supports a scoped version of the claim with credible evidence.",
+        "Position: The contribution can stand if framed conservatively around measured outcomes.",
+    ]
+    skeptic_gaps = {
+        "novelty": "novelty delta versus closest prior work is not explicit in quantified terms",
+        "method": "method assumptions are not yet justified strongly enough for the full claim",
+        "evaluation": "evaluation coverage does not fully match the breadth of the claim",
+        "ablation": "robustness/ablation evidence is too thin for stronger wording",
+        "reproducibility": "replication-critical details remain insufficiently specified",
+    }
+    advocate_strengths = {
+        "novelty": "accessibility and telemetry-free analysis provide a meaningful scoped contribution",
+        "method": "method choices are reasonable for an exploratory scoped study",
+        "evaluation": "evidence supports a narrower claim tied to reported settings",
+        "ablation": "feasibility is supported, with robustness claims needing scoped language",
+        "reproducibility": "contribution can be retained with explicit implementation caveats",
+    }
+
+    if speaker == "skeptic":
+        opener = skeptic_openers[(speaker_turn_number - 1) % len(skeptic_openers)]
+        gap = skeptic_gaps.get(category, "evidence-claim alignment is still incomplete")
+        return (
+            f"{opener}\n"
+            "Argument:\n"
+            f"- Rebuttal target: {opponent_gap or opponent_short}.\n"
+            f"- Evidence anchor: \"{p_text}\" [{p_cite}].\n"
+            f"- Why rebuttal fails: {gap}. Supporting context: \"{s_text}\" [{s_cite}].\n"
+            "- Required revision: narrow the claim sentence and add one explicit comparator on a reported metric."
         )
-        content = (response or "").strip()
-    except Exception:
-        content = _fallback_reviewer_turn(
+
+    opener = advocate_openers[(speaker_turn_number - 1) % len(advocate_openers)]
+    strength = advocate_strengths.get(category, "claim can be defended when scoped to reported evidence")
+    return (
+        f"{opener}\n"
+        "Argument:\n"
+        f"- Counter to skeptic: {opponent_gap or opponent_short}.\n"
+        f"- Evidence anchor: \"{p_text}\" [{p_cite}].\n"
+        f"- Defense logic: {strength}. Boundary signal: \"{s_text}\" [{s_cite}].\n"
+        "- Accepted limitation: contribution should be stated as scoped to the reported setup and measurements."
+    )
+
+
+def _extract_opponent_position(turn: str) -> str:
+    text = (turn or "").strip()
+    if not text:
+        return ""
+    match = re.search(r"Position:\s*(.+)", text, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    sentence = re.sub(r"\s+", " ", match.group(1)).strip()
+    return sentence[:150]
+
+
+def _extract_opponent_gap(turn: str) -> str:
+    text = (turn or "").strip()
+    if not text:
+        return ""
+    patterns = (
+        r"Unresolved gap:\s*(.+?)(?:\n|$)",
+        r"Remaining issue:\s*(.+?)(?:\n|$)",
+        r"Why rebuttal fails:\s*(.+?)(?:\n|$)",
+        r"Counter to skeptic:\s*(.+?)(?:\n|$)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            snippet = re.sub(r"\s+", " ", match.group(1)).strip()
+            if snippet:
+                return snippet[:180]
+    return ""
+
+
+def _enforce_grounded_reviewer_turn(
+    *,
+    speaker: str,
+    turn_text: str,
+    active_vector: dict[str, Any],
+    evidence_pack: list[dict[str, Any]],
+    opponent_turn: str = "",
+) -> str:
+    text = (turn_text or "").strip()
+    if not text:
+        return _grounded_reviewer_template(
             speaker=speaker,
             active_vector=active_vector,
-            documents=turn_docs,
+            evidence_pack=evidence_pack,
+            opponent_turn=opponent_turn,
         )
-    route_meta = _extract_route_meta(content, default_target="advocate" if speaker == "skeptic" else "skeptic")
-    return _clean_reviewer_turn_text(_strip_route_json_footer(content)), route_meta
+    if _reviewer_turn_low_quality(text=text, evidence_pack=evidence_pack):
+        return _grounded_reviewer_template(
+            speaker=speaker,
+            active_vector=active_vector,
+            evidence_pack=evidence_pack,
+            opponent_turn=opponent_turn,
+        )
+    if "position:" not in text.lower() or "argument:" not in text.lower():
+        return _grounded_reviewer_template(
+            speaker=speaker,
+            active_vector=active_vector,
+            evidence_pack=evidence_pack,
+            opponent_turn=opponent_turn,
+        )
+    return text
+
+
+def _reviewer_turn_low_quality(*, text: str, evidence_pack: list[dict[str, Any]]) -> bool:
+    lower = (text or "").lower()
+    if len(lower) < 80:
+        return True
+    if len(lower) > 2200:
+        return True
+    if not re.search(r"\[[0-9]+\]", lower):
+        return True
+
+    evidence_tokens: set[str] = set()
+    evidence_overlaps: list[float] = []
+    for item in evidence_pack:
+        snippet = str(item.get("snippet", ""))
+        evidence_tokens.update(_tokenize_for_overlap(snippet))
+        evidence_overlaps.append(_overlap_score(lower, set(_tokenize_for_overlap(snippet))))
+    if evidence_tokens:
+        overlap = _overlap_score(lower, evidence_tokens)
+        if overlap < 0.14:
+            return True
+    if evidence_overlaps and max(evidence_overlaps) < 0.22:
+        return True
+
+    generic_markers = (
+        "real-world scenarios",
+        "practical applications",
+        "specific examples would strengthen",
+        "case studies",
+        "significant impact",
+        "broader implications",
+        "methodological shift",
+        "intriguing",
+        "it is difficult to assess",
+        "would strengthen this argument significantly",
+    )
+    generic_hits = sum(1 for marker in generic_markers if marker in lower)
+    if generic_hits >= 1:
+        return True
+
+    if lower.count("?") >= 3:
+        return True
+    if lower.count("while") >= 3 and "response to" not in lower:
+        return True
+    return False
+
+
+def _grounded_reviewer_template(
+    *,
+    speaker: str,
+    active_vector: dict[str, Any],
+    evidence_pack: list[dict[str, Any]],
+    opponent_turn: str = "",
+) -> str:
+    quote = str(active_vector.get("quote", "")).strip()
+    claim = str(active_vector.get("claim", "")).strip() or "the active claim"
+
+    primary = evidence_pack[0] if evidence_pack else {}
+    secondary = evidence_pack[1] if len(evidence_pack) > 1 else primary
+    p_text = _compact_turn_text(str(primary.get("snippet", "")).strip() or quote or claim, max_chars=180)
+    p_cite = int(primary.get("citation_index", 1)) if primary else 1
+    s_text = _compact_turn_text(str(secondary.get("snippet", "")).strip() or p_text, max_chars=180)
+    s_cite = int(secondary.get("citation_index", 1)) if secondary else p_cite
+    category = str(active_vector.get("category", "method")).strip().lower()
+    opponent_short = _compact_turn_text(opponent_turn, max_chars=140) if opponent_turn else ""
+
+    skeptic_gap_by_category = {
+        "novelty": "the novelty delta versus closest prior work is still not explicit in quantified terms.",
+        "method": "key method assumptions are not yet justified strongly enough for the full claim.",
+        "evaluation": "evaluation coverage does not yet fully match the breadth of the claim.",
+        "ablation": "ablation/robustness evidence is still too thin to support stronger wording.",
+        "reproducibility": "replication-critical details remain underspecified for a strong claim.",
+    }
+    advocate_defense_by_category = {
+        "novelty": "the contribution can be defended as a scoped accessibility/telemetry-free approach.",
+        "method": "the method is defensible when described as an exploratory, scoped design choice.",
+        "evaluation": "evaluation can support a narrower claim aligned to reported settings.",
+        "ablation": "current evidence supports feasibility; stronger robustness framing should be conditional.",
+        "reproducibility": "claim is defendable when bounded and accompanied by explicit implementation caveats.",
+    }
+    skeptic_gap = skeptic_gap_by_category.get(category, "the claim still extends beyond what is directly demonstrated.")
+    advocate_defense = advocate_defense_by_category.get(category, "the claim is defensible when explicitly scoped.")
+
+    if speaker == "skeptic":
+        return (
+            "Position: Evidence supports feasibility, but the claim is still broader than what is directly demonstrated.\n"
+            "Argument:\n"
+            f"- Evidence shown: \"{p_text}\" [{p_cite}].\n"
+            f"- Gap: {skeptic_gap} Supporting context: \"{s_text}\" [{s_cite}].\n"
+            f"- Response to advocate: {opponent_short if opponent_short else 'scope-limited defense is reasonable, but still needs tighter evidence linkage.'}"
+        )
+    return (
+        "Position: The claim is defensible when explicitly bounded to the reported setup and evidence.\n"
+        "Argument:\n"
+        f"- Supporting evidence: \"{p_text}\" [{p_cite}].\n"
+        f"- Scope support: \"{s_text}\" [{s_cite}] indicates the paper already states limits that can bound the claim.\n"
+        f"- Response to skeptic: {advocate_defense} Keep wording scoped to reported measurements."
+    )
 
 
 def _format_vector_history(
@@ -2391,9 +3137,23 @@ def _select_turn_documents(
         text = document.page_content or ""
         overlap = _overlap_score(text, query_terms)
         rank_prior = max(0.05, 1.0 - (index / max(1, len(documents))))
-        scored.append((document, overlap + (0.4 * rank_prior)))
+        penalty = _low_signal_penalty(text)
+        scored.append((document, overlap + (0.4 * rank_prior) - (0.6 * penalty)))
     scored.sort(key=lambda pair: pair[1], reverse=True)
-    return [document for document, _ in scored[:3]]
+    selected: list[Document] = []
+    seen_pages: set[tuple[str, Any]] = set()
+    for document, _score in scored:
+        metadata = document.metadata or {}
+        filename = str(metadata.get("filename", "")).strip()
+        page = metadata.get("page")
+        key = (filename, page)
+        if key in seen_pages:
+            continue
+        seen_pages.add(key)
+        selected.append(document)
+        if len(selected) >= 4:
+            break
+    return selected if selected else [document for document, _ in scored[:2]]
 
 
 def _extract_route_meta(text: str, default_target: str) -> dict[str, Any]:
@@ -2438,21 +3198,21 @@ def _fallback_reviewer_turn(
     secondary = evidence[1] if len(evidence) > 1 else primary
     if speaker == "skeptic":
         return (
-            "Position: Evidence for this claim is still not tight enough.\n"
+            "Position: Evidence supports feasibility, but not the full strength of the claim as currently worded.\n"
             "Argument:\n"
             f"- Triggered claim: \"{quote}\"\n"
             f"- Evidence check: \"{primary}\" [1].\n"
-            "- Concern: this supports feasibility, but not a strong novelty delta versus prior work [1].\n"
-            "- Request: add one quantitative comparator and explicitly bound the scope claim [1].\n"
+            f"- Scope gap: \"{secondary}\" [1] indicates limits that should be reflected in claim wording.\n"
+            "- Request: tighten claim scope and anchor it to one explicit reported metric.\n"
             'ROUTE_JSON: {"addressed_to":"advocate","concession":false,"confidence":0.54}'
         )
     return (
-        "Position: The claim has partial support but should be framed with clearer limits.\n"
+        "Position: The claim is supportable when bounded to the paper's measured scope.\n"
         "Argument:\n"
         f"- Triggered claim: \"{quote}\"\n"
         f"- Supporting evidence: \"{primary}\" [1].\n"
         f"- Scope caveat already present: \"{secondary}\" [1].\n"
-        "- Revision path: keep the contribution framing but tighten novelty wording to the measured scope [1].\n"
+        "- Revision path: keep contribution framing and rewrite novelty language to match exactly what is measured.\n"
         'ROUTE_JSON: {"addressed_to":"skeptic","concession":false,"confidence":0.56}'
     )
 
@@ -2488,6 +3248,8 @@ def _fallback_vector_evidence(
                 continue
             if _looks_like_reference_snippet(snippet):
                 continue
+            if _looks_like_non_argument_snippet(snippet):
+                continue
             overlap = _overlap_score(snippet.lower(), query_terms)
             phrase = _phrase_overlap_score(_normalize_for_phrase_match(snippet.lower()), query_phrases)
             numeric_bonus = 0.15 if re.search(r"\b\d+(?:\.\d+)?%?\b", snippet) else 0.0
@@ -2515,11 +3277,146 @@ def _fallback_vector_evidence(
     return selected
 
 
+def _build_vector_evidence_pack(
+    *,
+    active_vector: dict[str, Any],
+    documents: list[Document],
+    limit: int,
+) -> list[dict[str, Any]]:
+    snippets = _fallback_vector_evidence(
+        active_vector=active_vector,
+        documents=documents,
+        limit=max(2, limit + 1),
+    )
+    if not snippets and documents:
+        fallback_text = _compact_turn_text(documents[0].page_content or "", max_chars=220)
+        if fallback_text:
+            snippets = [fallback_text]
+    pack: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, snippet in enumerate(snippets, start=1):
+        normalized = re.sub(r"\s+", " ", snippet).strip()
+        if not normalized:
+            continue
+        lowered = normalized.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        doc_index = _best_doc_index_for_snippet(snippet=normalized, documents=documents)
+        citation_index = doc_index + 1 if doc_index >= 0 else 1
+        metadata = documents[doc_index].metadata if 0 <= doc_index < len(documents) else {}
+        pack.append(
+            {
+                "id": f"E{index}",
+                "snippet": normalized,
+                "citation_index": citation_index,
+                "filename": str((metadata or {}).get("filename", "unknown.pdf")),
+                "page": (metadata or {}).get("page"),
+                "chunk_id": str((metadata or {}).get("chunk_id", "")),
+            }
+        )
+        if len(pack) >= max(1, limit):
+            break
+    return pack
+
+
+def _best_doc_index_for_snippet(*, snippet: str, documents: list[Document]) -> int:
+    if not documents:
+        return -1
+    lowered = snippet.lower()
+    query_terms = set(_tokenize_for_overlap(lowered))
+    best_index = 0
+    best_score = float("-inf")
+    for index, document in enumerate(documents):
+        text = (document.page_content or "").lower()
+        if not text:
+            continue
+        contains_bonus = 1.2 if lowered and lowered in text else 0.0
+        overlap = _overlap_score(text, query_terms)
+        score = contains_bonus + overlap
+        if score > best_score:
+            best_score = score
+            best_index = index
+    return best_index
+
+
+def _format_evidence_pack(pack: list[dict[str, Any]]) -> str:
+    if not pack:
+        return "- No direct evidence snippets available from current retrieval."
+    lines: list[str] = []
+    for item in pack:
+        evidence_id = str(item.get("id", "E?"))
+        citation_index = int(item.get("citation_index", 1))
+        filename = str(item.get("filename", "unknown.pdf"))
+        page = item.get("page")
+        page_text = f", p.{page}" if page else ""
+        snippet = str(item.get("snippet", "")).strip()
+        lines.append(
+            f"- {evidence_id} -> [{citation_index}] {filename}{page_text}: \"{snippet}\""
+        )
+    return "\n".join(lines)
+
+
 def _clean_reviewer_turn_text(text: str) -> str:
     cleaned = (text or "").strip()
     cleaned = re.sub(r"^\s*#+\s*Reviewer\s+[AB]\s*\([^)]+\)\s*\n?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^\s*Reviewer\s+[AB]\s*\([^)]+\)\s*[:\-]?\s*", "", cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
+
+
+def _reduce_reviewer_repetition(
+    *,
+    speaker: str,
+    turn_text: str,
+    previous_turn: str,
+    active_vector: dict[str, Any],
+    evidence_pack: list[dict[str, Any]],
+) -> str:
+    current = (turn_text or "").strip()
+    previous = (previous_turn or "").strip()
+    if not current or not previous:
+        return current
+    similarity = _turn_similarity_score(current, previous)
+    if similarity < 0.70:
+        return current
+
+    alternate = evidence_pack[1] if len(evidence_pack) > 1 else (evidence_pack[0] if evidence_pack else {})
+    alt_snippet = str(alternate.get("snippet", "")).strip()
+    alt_citation = int(alternate.get("citation_index", 1)) if alternate else 1
+    claim = str(active_vector.get("claim", "")).strip() or "this claim"
+    category = str(active_vector.get("category", "method")).strip().lower()
+
+    skeptic_gap_by_category = {
+        "novelty": "the novelty delta versus closest prior work still needs an explicit quantitative statement",
+        "method": "the method rationale still needs stronger evidence for the full framing",
+        "evaluation": "evaluation support is still narrower than the breadth of the current claim",
+        "ablation": "robustness evidence is still too limited for stronger wording",
+        "reproducibility": "replication-critical details remain incomplete for a stronger claim",
+    }
+    advocate_support_by_category = {
+        "novelty": "the contribution can still be defended as a scoped telemetry-free analysis approach",
+        "method": "the method remains defensible if framed as a scoped design choice",
+        "evaluation": "the reported setup supports a narrower claim aligned to measured outcomes",
+        "ablation": "the evidence supports feasibility, with robustness framed as future work",
+        "reproducibility": "the claim can stand with explicit implementation boundaries",
+    }
+
+    if speaker == "skeptic":
+        return (
+            "Position: The unresolved evidence gap still blocks a stronger claim.\n"
+            "Argument:\n"
+            f"- Evidence anchor: \"{alt_snippet or claim}\" [{alt_citation}].\n"
+            f"- Remaining issue: {skeptic_gap_by_category.get(category, 'evidence-claim alignment is still incomplete')}.\n"
+            "- Required revision: narrow wording and attach one concrete metric/baseline comparator."
+        )
+
+    return (
+        "Position: The claim remains defendable with explicit scope boundaries.\n"
+        "Argument:\n"
+        f"- Supporting anchor: \"{alt_snippet or claim}\" [{alt_citation}].\n"
+        f"- Defense: {advocate_support_by_category.get(category, 'the claim is defensible when tied directly to reported evidence')}.\n"
+        "- Revision path: keep the contribution, but state limits and comparator in the same paragraph."
+    )
 
 
 def _refresh_debate_summary(
@@ -2528,107 +3425,266 @@ def _refresh_debate_summary(
     active_vector: dict[str, Any],
     debate_history: list[dict[str, Any]],
 ) -> str:
-    if not text_service.available:
-        return debate_summary
     vector_id = str(active_vector.get("id", "V?"))
-    excerpt = _format_vector_history(debate_history=debate_history, vector_id=vector_id, max_turns=6)
-    try:
-        response = text_service.generate(
-            system_prompt=(
-                "Compress debate context into exactly 3 short sentences capturing disagreement, strongest evidence, and unresolved item."
-            ),
-            user_prompt=(
-                f"Existing summary:\n{debate_summary or 'None'}\n\n"
-                f"New turns for {vector_id}:\n{excerpt}\n\n"
-                "Return exactly 3 sentences."
-            ),
-            temperature=0.0,
-            max_output_tokens=120,
-        )
-        return (response or debate_summary or "").strip()
-    except Exception:
+    claim = str(active_vector.get("claim", "")).strip() or "the active claim"
+    skeptic_latest = _compact_turn_text(
+        _latest_speaker_content(debate_history, speaker="skeptic", vector_id=vector_id),
+        max_chars=180,
+    )
+    advocate_latest = _compact_turn_text(
+        _latest_speaker_content(debate_history, speaker="advocate", vector_id=vector_id),
+        max_chars=180,
+    )
+    if not skeptic_latest and not advocate_latest:
         return debate_summary
+    sentence_1 = f"Debate on {vector_id} centers on whether {claim.lower()} is adequately supported."
+    sentence_2 = f"Skeptic focus: {skeptic_latest or 'insufficient concrete evidence.'}"
+    sentence_3 = f"Advocate focus: {advocate_latest or 'scope-limited defense with partial support.'}"
+    return " ".join([sentence_1, sentence_2, sentence_3]).strip()
 
 
-def _compute_vector_verdict(
+def _run_evidence_only_judge(
     *,
     active_vector: dict[str, Any],
     debate_history: list[dict[str, Any]],
     resolution: str,
-) -> str:
-    if resolution in {"deadlocked", "force_closed"}:
-        return "contested"
-    if not text_service.available:
-        return "contested"
+    documents: list[Document],
+) -> dict[str, Any]:
     vector_id = str(active_vector.get("id", "V?"))
+    evidence_pack = _build_vector_evidence_pack(
+        active_vector=active_vector,
+        documents=documents,
+        limit=3,
+    )
+    if resolution in {"deadlocked", "force_closed"}:
+        return {
+            "verdict": "contested",
+            "confidence": 0.42,
+            "rationale": "Debate hit stopping criteria without a clean evidence-based resolution.",
+            "decisive_evidence": [item.get("id", "E1") for item in evidence_pack[:1]],
+            "evidence_pack": evidence_pack,
+        }
+
+    fallback = {
+        "verdict": "contested",
+        "confidence": 0.5,
+        "rationale": "Evidence was mixed and no side clearly prevailed on the quoted claim.",
+        "decisive_evidence": [item.get("id", "E1") for item in evidence_pack[:1]],
+        "evidence_pack": evidence_pack,
+    }
+    if not text_service.available:
+        return fallback
     try:
         response = text_service.generate(
             system_prompt=(
-                "Return JSON only with key verdict. Allowed verdict values: "
-                "skeptic_prevailed, advocate_prevailed, contested."
+                "You are an evidence-only judge for a paper-review trial.\n"
+                "Decide ONLY from the provided evidence pack and debate excerpt.\n"
+                "If evidence does not settle the claim, return contested.\n"
+                "Return JSON only with keys: verdict, confidence, rationale, decisive_evidence.\n"
+                "Allowed verdict values: skeptic_prevailed, advocate_prevailed, contested."
             ),
             user_prompt=(
-                f"Vector {vector_id}: {active_vector.get('claim', '')}\n"
-                f"Debate excerpt:\n{_format_vector_history(debate_history=debate_history, vector_id=vector_id, max_turns=8)}"
+                f"Claim vector: {vector_id} | {active_vector.get('claim', '')}\n"
+                f"Claim trigger quote: {active_vector.get('quote', '')}\n\n"
+                "Evidence pack:\n"
+                f"{_format_evidence_pack(evidence_pack)}\n\n"
+                "Debate excerpt:\n"
+                f"{_format_vector_history(debate_history=debate_history, vector_id=vector_id, max_turns=8)}\n\n"
+                "Rules:\n"
+                "- decisive_evidence must be an array of evidence ids from the pack (for example [\"E1\",\"E2\"]).\n"
+                "- rationale must be one short sentence."
             ),
             temperature=0.0,
-            max_output_tokens=80,
+            max_output_tokens=180,
         )
     except Exception:
-        return "contested"
+        return fallback
+
     payload = _try_parse_json_payload(response)
-    if isinstance(payload, dict):
-        verdict = str(payload.get("verdict", "contested")).strip().lower()
-        if verdict in {"skeptic_prevailed", "advocate_prevailed", "contested"}:
-            return verdict
-    return "contested"
+    if not isinstance(payload, dict):
+        return fallback
+
+    verdict = str(payload.get("verdict", "contested")).strip().lower()
+    if verdict not in {"skeptic_prevailed", "advocate_prevailed", "contested"}:
+        verdict = "contested"
+    try:
+        confidence = float(payload.get("confidence", 0.5))
+    except Exception:
+        confidence = 0.5
+    confidence = max(0.0, min(1.0, confidence))
+    rationale = str(payload.get("rationale", "")).strip() or fallback["rationale"]
+    decisive_raw = payload.get("decisive_evidence", [])
+    decisive: list[str] = []
+    allowed_ids = {str(item.get("id", "")) for item in evidence_pack}
+    if isinstance(decisive_raw, list):
+        for item in decisive_raw:
+            evidence_id = str(item).strip()
+            if evidence_id in allowed_ids and evidence_id not in decisive:
+                decisive.append(evidence_id)
+    if not decisive and evidence_pack:
+        decisive = [str(evidence_pack[0].get("id", "E1"))]
+    return {
+        "verdict": verdict,
+        "confidence": confidence,
+        "rationale": rationale,
+        "decisive_evidence": decisive,
+        "evidence_pack": evidence_pack,
+    }
+
+
+def _render_judge_card(*, active_vector_id: str, judgment: dict[str, Any]) -> str:
+    verdict = str(judgment.get("verdict", "contested"))
+    confidence = float(judgment.get("confidence", 0.0))
+    rationale = str(judgment.get("rationale", "No rationale.")).strip()
+    evidence_pack = judgment.get("evidence_pack", [])
+    evidence_lookup: dict[str, str] = {}
+    if isinstance(evidence_pack, list):
+        for item in evidence_pack:
+            if not isinstance(item, dict):
+                continue
+            evidence_id = str(item.get("id", "")).strip()
+            citation_index = int(item.get("citation_index", 1))
+            if evidence_id:
+                evidence_lookup[evidence_id] = f"{evidence_id} [{citation_index}]"
+    decisive_labels: list[str] = []
+    decisive_raw = judgment.get("decisive_evidence", [])
+    if isinstance(decisive_raw, list):
+        for item in decisive_raw:
+            evidence_id = str(item).strip()
+            if not evidence_id:
+                continue
+            decisive_labels.append(evidence_lookup.get(evidence_id, evidence_id))
+    decisive_text = ", ".join(decisive_labels) if decisive_labels else "none"
+    return (
+        "### Evidence-only Judge\n"
+        f"Vector: {active_vector_id}\n"
+        f"Verdict: {verdict}\n"
+        f"Confidence: {confidence:.2f}\n"
+        f"Decisive Evidence: {decisive_text}\n"
+        f"Rationale: {rationale}"
+    )
 
 
 def _synthesise_vector(
     *,
     active_vector: dict[str, Any],
     verdict: str,
+    judgment: dict[str, Any],
     debate_history: list[dict[str, Any]],
     documents: list[Document],
 ) -> str:
     vector_id = str(active_vector.get("id", "V?"))
     if not text_service.available:
-        return (
-            f"### Action Card {vector_id}\n"
-            f"Verdict: {verdict}\n"
-            "Rewrite Instruction: Rewrite the claim paragraph to align scope with demonstrated evidence and add one concrete quantitative comparison."
-        )
+        return _build_grounded_rewrite_card(active_vector=active_vector, verdict=verdict, judgment=judgment)
     try:
+        evidence_text = _format_evidence_pack(judgment.get("evidence_pack", []))
         response = text_service.generate(
             system_prompt=(
-                "You generate one concrete rewrite instruction after a debate.\n"
-                "Do not summarize the debate. Produce exactly one actionable edit request tied to paper text."
+                "You are a rewrite compiler that converts a judged review claim into one concrete patch.\n"
+                "Do not summarize the debate. Output exactly one actionable patch tied to paper evidence.\n"
+                "Do not invent metrics, datasets, or numeric results not present in the evidence pack."
             ),
             user_prompt=(
                 f"Vector: {vector_id} | {active_vector.get('claim', '')}\n"
                 f"Verdict: {verdict}\n"
+                f"Judge rationale: {judgment.get('rationale', '')}\n"
+                f"Judge decisive evidence ids: {judgment.get('decisive_evidence', [])}\n"
                 f"Quoted trigger sentence: {active_vector.get('quote', '')}\n"
+                "Evidence pack:\n"
+                f"{evidence_text}\n\n"
                 "Debate transcript:\n"
                 f"{_format_vector_history(debate_history=debate_history, vector_id=vector_id, max_turns=10)}\n\n"
                 "Retrieved context:\n"
                 f"{_format_context(documents, max_docs=max(settings.rerank_top_n, 8))}\n\n"
                 "Output format:\n"
-                "### Action Card\n"
+                "### Rewrite Compiler Card\n"
                 "Target Section: <section name or approximate location>\n"
-                "Rewrite Instruction: <one concrete instruction sentence with metric/baseline/clarification target>\n"
+                "Target Claim: <the claim being rewritten>\n"
+                "Patch Instruction: <one concrete instruction sentence with metric/baseline/clarification target>\n"
+                "Patch (Before -> After):\n"
+                "- Before: <short phrase for current wording weakness>\n"
+                "- After: <short phrase for corrected wording>\n"
                 "Why: <one sentence>"
             ),
             temperature=0.1,
-            max_output_tokens=220,
+            max_output_tokens=280,
         )
-        return (response or "").strip()
+        candidate = (response or "").strip()
+        if not candidate:
+            return _build_grounded_rewrite_card(active_vector=active_vector, verdict=verdict, judgment=judgment)
+        if _rewrite_card_low_quality(candidate, judgment.get("evidence_pack", [])):
+            return _build_grounded_rewrite_card(active_vector=active_vector, verdict=verdict, judgment=judgment)
+        return candidate
     except Exception:
-        return (
-            "### Action Card\n"
-            "Target Section: contribution/claim paragraph\n"
-            "Rewrite Instruction: replace broad claim wording with a bounded statement and add one quantitative comparison against the closest baseline on the reported metric.\n"
-            "Why: this preserves the contribution while reducing overclaim risk."
-        )
+        return _build_grounded_rewrite_card(active_vector=active_vector, verdict=verdict, judgment=judgment)
+
+
+def _build_grounded_rewrite_card(
+    *,
+    active_vector: dict[str, Any],
+    verdict: str,
+    judgment: dict[str, Any],
+) -> str:
+    claim = str(active_vector.get("claim", "")).strip() or "the active claim"
+    evidence_pack = judgment.get("evidence_pack", []) if isinstance(judgment, dict) else []
+    snippet = ""
+    citation = 1
+    if isinstance(evidence_pack, list) and evidence_pack:
+        first = evidence_pack[0] if isinstance(evidence_pack[0], dict) else {}
+        snippet = _compact_turn_text(str(first.get("snippet", "")).strip(), max_chars=220)
+        try:
+            citation = int(first.get("citation_index", 1))
+        except Exception:
+            citation = 1
+    section_hint = _rewrite_section_hint(claim)
+    evidence_line = f'Key Evidence: "{snippet}" [{citation}]' if snippet else "Key Evidence: use the strongest cited sentence for this claim."
+    return (
+        "### Rewrite Compiler Card\n"
+        f"Verdict: {verdict}\n"
+        f"Target Section: {section_hint}\n"
+        f"Target Claim: {claim}\n"
+        f"{evidence_line}\n"
+        "Patch Instruction: rewrite the claim to stay within measured scope, then add one explicit metric/comparator already reported in the cited evidence.\n"
+        "Patch (Before -> After):\n"
+        "- Before: broad claim wording that exceeds direct support.\n"
+        "- After: scoped claim wording tied to cited measurement and stated limitation.\n"
+        "Why: this converts a contested claim into an evidence-aligned statement without overreach."
+    )
+
+
+def _rewrite_section_hint(claim: str) -> str:
+    lower = (claim or "").lower()
+    if "novel" in lower or "contribution" in lower:
+        return "Introduction / Contribution Framing"
+    if "method" in lower or "implementation" in lower:
+        return "Methods"
+    if "evaluation" in lower or "benchmark" in lower:
+        return "Results / Evaluation"
+    if "ablation" in lower or "robust" in lower:
+        return "Results / Limitations"
+    return "Discussion"
+
+
+def _rewrite_card_low_quality(text: str, evidence_pack: list[dict[str, Any]]) -> bool:
+    lower = (text or "").lower()
+    if "patch instruction:" not in lower:
+        return True
+    if "before" not in lower or "after" not in lower:
+        return True
+    evidence_text = " ".join(str((item or {}).get("snippet", "")) for item in evidence_pack if isinstance(item, dict))
+    allowed_numbers = set(re.findall(r"\b\d+(?:\.\d+)?%?\b", evidence_text))
+    output_numbers = set(re.findall(r"\b\d+(?:\.\d+)?%?\b", text or ""))
+    if output_numbers and allowed_numbers:
+        unseen = {value for value in output_numbers if value not in allowed_numbers}
+        if unseen:
+            return True
+    banned_markers = (
+        "significant improvement",
+        "state of the art",
+        "outperform",
+        "novel benchmark gain",
+    )
+    return any(marker in lower for marker in banned_markers)
 
 
 def _render_reviewer_debate(
@@ -2638,6 +3694,10 @@ def _render_reviewer_debate(
     vectors_remaining: list[str],
     syntheses: dict[str, str],
     vector_verdicts: dict[str, str],
+    vector_judgments: dict[str, dict[str, Any]],
+    vector_reports: dict[str, dict[str, Any]],
+    current_vector_report: dict[str, Any],
+    final_report: dict[str, Any],
     round_events: list[dict[str, Any]],
     debate_history: list[dict[str, Any]],
     debate_summary: str,
@@ -2645,91 +3705,736 @@ def _render_reviewer_debate(
     turn_count: int,
     next_speaker: str,
 ) -> str:
-    progress = "".join("*" if idx < turn_count else "o" for idx in range(settings.reviewer_max_turns))
-    vector_lines: list[str] = []
-    for vector in attack_vectors:
-        vector_id = str(vector.get("id", "V?"))
-        status = "resolved" if vector_id in syntheses else ("active" if vector_id == str(active_vector.get("id", "")) else "queued")
-        verdict = vector_verdicts.get(vector_id, "pending")
-        vector_lines.append(
-            f"- {vector_id} [{status}] verdict={verdict} ({vector.get('severity', 'medium')}/{vector.get('category', 'method')}): {vector.get('claim', '')}\n"
-            f"  Quote: \"{vector.get('quote', '')}\""
+    active_vector_id = str(active_vector.get("id", "V?"))
+    active_claim = str(active_vector.get("claim", "")).strip() or "Unspecified claim."
+    total_claims = max(1, len(attack_vectors))
+    active_rank = 1
+    for idx, vector in enumerate(attack_vectors, start=1):
+        if str(vector.get("id", "")) == active_vector_id:
+            active_rank = idx
+            break
+
+    if isinstance(final_report, dict) and final_report and not vectors_remaining:
+        complete_reports = dict(vector_reports or {})
+        if isinstance(current_vector_report, dict) and current_vector_report:
+            complete_reports[active_vector_id] = current_vector_report
+        return _render_reviewer_complete_report(
+            attack_vectors=attack_vectors,
+            vector_verdicts=vector_verdicts,
+            vector_judgments=vector_judgments,
+            vector_reports=complete_reports,
+            syntheses=syntheses,
+            debate_history=debate_history,
+            final_report=final_report,
         )
 
-    if not round_events:
-        round_text = "- No new reviewer turns generated in this round."
-    else:
-        fragments: list[str] = []
-        for event in round_events:
-            speaker = str(event.get("speaker", "")).lower()
-            if speaker == "synthesise":
-                fragments.append(f"### Synthesis ({event.get('vector_id', '')})\n{event.get('content', '')}")
-            else:
-                heading = "Skeptic" if speaker == "skeptic" else "Advocate" if speaker == "advocate" else speaker.title()
-                meta = event.get("meta", {}) if isinstance(event.get("meta"), dict) else {}
-                tag = (
-                    f"Tag: addressed_to={meta.get('addressed_to', 'none')} | "
-                    f"conceded={str(bool(meta.get('concession', False))).lower()} | "
-                    f"confidence={float(meta.get('confidence', 0.0)):.2f}"
-                )
-                fragments.append(f"### {heading}\n{event.get('content', '')}\n\n{tag}")
-        round_text = "\n\n".join(fragments)
+    status_map = {
+        "open": "Open",
+        "resolved": "Resolved",
+        "deadlocked": "Deadlocked",
+        "force_closed": "Force Closed",
+    }
+    status_label = status_map.get(str(resolution).lower(), str(resolution).title())
 
-    active_vector_id = str(active_vector.get("id", "V?"))
-    active_synthesis = syntheses.get(active_vector_id, "")
-    action_cards = [
-        f"### {vector_id}\n{content}"
-        for vector_id, content in syntheses.items()
-    ]
-    latest_excerpt = _format_vector_history_compact(
-        debate_history=debate_history,
+    skeptic_latest = _latest_speaker_content(
+        debate_history,
+        speaker="skeptic",
         vector_id=active_vector_id,
-        max_turns=4,
     )
+    advocate_latest = _latest_speaker_content(
+        debate_history,
+        speaker="advocate",
+        vector_id=active_vector_id,
+    )
+
+    judgment = vector_judgments.get(active_vector_id, {})
+    has_judgment = isinstance(judgment, dict) and bool(judgment)
+    judge_verdict = str(judgment.get("verdict", "pending")) if has_judgment else "pending"
+    try:
+        judge_confidence = float(judgment.get("confidence", 0.0)) if has_judgment else 0.0
+    except Exception:
+        judge_confidence = 0.0
+    judge_rationale = str(judgment.get("rationale", "")).strip() if has_judgment else ""
+
+    active_rewrite = syntheses.get(active_vector_id, "")
+    if not active_rewrite and syntheses:
+        # Show the latest completed rewrite card if current claim is still open.
+        latest_completed_id = list(syntheses.keys())[-1]
+        active_rewrite = syntheses.get(latest_completed_id, "")
+
+    queued_claims: list[str] = []
+    for idx, vector in enumerate(attack_vectors, start=1):
+        vector_id = str(vector.get("id", "V?"))
+        if vector_id == active_vector_id:
+            continue
+        claim_text = str(vector.get("claim", "")).strip()
+        if not claim_text:
+            continue
+        state = "resolved" if vector_id in syntheses else "queued"
+        queued_claims.append(f"- Claim {idx} ({state}): {claim_text}")
+        if len(queued_claims) >= 3:
+            break
+
     next_move = _human_next_move(next_speaker=next_speaker, vector_id=active_vector_id)
+    this_round = _render_round_events_compact(round_events=round_events, vector_id=active_vector_id)
 
     blocks = [
-        "## Reviewer Arena",
-        f"Active Vector: {active_vector_id} - {active_vector.get('claim', '')}",
-        f"Resolution: {resolution} | Debate Turns: {turn_count}/{settings.reviewer_max_turns}",
-        f"Progress: {progress}",
+        "## Review Panel",
+        f"Primary Claim: {active_claim}",
+        f"Claim {active_rank}/{total_claims} | Status: {status_label} | Turn {turn_count}/{settings.reviewer_max_turns}",
         "",
-        "## Attack Vectors",
-        "\n".join(vector_lines),
+        "### Skeptic (Latest)",
+        skeptic_latest or "No skeptic argument yet.",
         "",
-        "## Compressed Context",
-        debate_summary or "No compressed summary yet.",
-        "",
-        "## This Round",
-        round_text,
-        "",
-        "## Latest Exchange",
-        latest_excerpt,
+        "### Advocate (Latest)",
+        advocate_latest or "No advocate response yet.",
     ]
-    if active_synthesis:
-        blocks.extend(["", "## Active Vector Synthesis", active_synthesis])
-    if action_cards:
-        blocks.extend(["", "## Action Cards", "\n\n".join(action_cards)])
+
+    if has_judgment:
+        blocks.extend(
+            [
+                "",
+                "### Judge",
+                f"Verdict: {judge_verdict}",
+                f"Confidence: {judge_confidence:.2f}",
+                f"Why: {judge_rationale or 'No rationale available.'}",
+            ]
+        )
+
+    if active_rewrite:
+        blocks.extend(
+            [
+                "",
+                "### Recommended Rewrite",
+                active_rewrite,
+            ]
+        )
+
+    if isinstance(current_vector_report, dict) and current_vector_report:
+        blocks.extend(
+            [
+                "",
+                "### Claim Intelligence",
+                _render_current_vector_report_brief(current_vector_report),
+            ]
+        )
+
+    if queued_claims:
+        blocks.extend(
+            [
+                "",
+                "### Other Claims",
+                "\n".join(queued_claims),
+            ]
+        )
+
     blocks.extend(
         [
             "",
-            "## Next Move",
+            "### Round Timeline",
+            this_round,
+            "",
+            "### Next Step",
             next_move,
-            f"Vectors remaining: {len(vectors_remaining)}",
-            "You can type `skeptic: ...`, `advocate: ...`, `vector 2`, or `next`.",
+            f"Claims remaining: {len(vectors_remaining)}",
+            "Use Reviewer Controls: `Next Turn` to continue, `Restart` to reset this debate.",
         ]
     )
     return "\n".join(blocks).strip()
 
 
+def _render_reviewer_complete_report(
+    *,
+    attack_vectors: list[dict[str, Any]],
+    vector_verdicts: dict[str, str],
+    vector_judgments: dict[str, dict[str, Any]],
+    vector_reports: dict[str, dict[str, Any]],
+    syntheses: dict[str, str],
+    debate_history: list[dict[str, Any]],
+    final_report: dict[str, Any],
+) -> str:
+    overview = str(final_report.get("overview", "")).strip() or "Panel review completed."
+    final_decision = str(final_report.get("final_decision", "")).strip() or "No final decision available."
+    confidence = final_report.get("confidence", 0.0)
+    try:
+        confidence_text = f"{float(confidence):.2f}"
+    except Exception:
+        confidence_text = "0.00"
+    agreements = [str(item).strip() for item in final_report.get("agreements", []) if str(item).strip()]
+    disagreements = [str(item).strip() for item in final_report.get("disagreements", []) if str(item).strip()]
+    suggestions = [str(item).strip() for item in final_report.get("final_suggestions", []) if str(item).strip()]
+
+    lines: list[str] = [
+        "## Reviewer Complete Report",
+        overview,
+        "",
+        f"Final Decision: {final_decision}",
+        f"Panel Confidence: {confidence_text}",
+    ]
+    if agreements:
+        lines.extend(["", "### Agreements"])
+        lines.extend(f"- {item}" for item in agreements[:5])
+    if disagreements:
+        lines.extend(["", "### Major Disagreements"])
+        lines.extend(f"- {item}" for item in disagreements[:5])
+    if suggestions:
+        lines.extend(["", "### Final Suggestions"])
+        lines.extend(f"- {item}" for item in suggestions[:6])
+
+    detailed_guidance = _build_detailed_author_guidance(
+        attack_vectors=attack_vectors,
+        vector_verdicts=vector_verdicts,
+        vector_judgments=vector_judgments,
+        vector_reports=vector_reports,
+        syntheses=syntheses,
+    )
+    if detailed_guidance:
+        lines.extend(["", "### Detailed Author Guidance"])
+        lines.extend(detailed_guidance)
+
+    for idx, vector in enumerate(attack_vectors, start=1):
+        vector_id = str(vector.get("id", "V?"))
+        claim = str(vector.get("claim", "")).strip() or "Unspecified claim."
+        verdict = str(vector_verdicts.get(vector_id, "contested"))
+        judgment = vector_judgments.get(vector_id, {})
+        rationale = str(judgment.get("rationale", "")).strip()
+        skeptic_latest = _latest_speaker_content(debate_history, speaker="skeptic", vector_id=vector_id)
+        advocate_latest = _latest_speaker_content(debate_history, speaker="advocate", vector_id=vector_id)
+        report = vector_reports.get(vector_id, {})
+        joint = str(report.get("joint_conclusion", "")).strip()
+        actions = [str(item).strip() for item in report.get("author_action_plan", []) if str(item).strip()]
+        rewrite = str(syntheses.get(vector_id, "")).strip()
+
+        lines.extend(
+            [
+                "",
+                f"### Claim {idx}: {claim}",
+                f"- Verdict: {verdict}",
+                f"- Judge rationale: {rationale or 'No rationale recorded.'}",
+                f"- Skeptic strongest point: {_compact_turn_text(skeptic_latest, max_chars=1200) or 'Not available.'}",
+                f"- Advocate strongest point: {_compact_turn_text(advocate_latest, max_chars=1200) or 'Not available.'}",
+            ]
+        )
+        if joint:
+            lines.append(f"- Joint conclusion: {joint}")
+        if actions:
+            lines.append("- Action plan:")
+            lines.extend(f"  - {item}" for item in actions[:3])
+        if rewrite:
+            lines.extend(["- Rewrite instruction:", rewrite])
+
+        transcript = _render_full_vector_transcript(debate_history=debate_history, vector_id=vector_id)
+        if transcript:
+            lines.extend(["- Full debate transcript:", transcript])
+
+    return "\n".join(lines).strip()
+
+
+def _render_full_vector_transcript(*, debate_history: list[dict[str, Any]], vector_id: str) -> str:
+    turns = [
+        item
+        for item in debate_history
+        if str(item.get("vector_id", "")) == vector_id and str(item.get("speaker", "")) in {"skeptic", "advocate"}
+    ]
+    if not turns:
+        return "No transcript available."
+    lines: list[str] = []
+    for item in turns:
+        speaker = str(item.get("speaker", "")).strip().title() or "Reviewer"
+        turn = int(item.get("turn", 0) or 0)
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        lines.append(f"  - Turn {turn} {speaker}: {_compact_turn_text(content, max_chars=1400)}")
+    return "\n".join(lines) if lines else "No transcript available."
+
+
+def _build_detailed_author_guidance(
+    *,
+    attack_vectors: list[dict[str, Any]],
+    vector_verdicts: dict[str, str],
+    vector_judgments: dict[str, dict[str, Any]],
+    vector_reports: dict[str, dict[str, Any]],
+    syntheses: dict[str, str],
+) -> list[str]:
+    guidance: list[str] = []
+    for idx, vector in enumerate(attack_vectors, start=1):
+        vector_id = str(vector.get("id", "V?"))
+        claim = str(vector.get("claim", "")).strip() or "Unspecified claim."
+        verdict = str(vector_verdicts.get(vector_id, "contested"))
+        judgment = vector_judgments.get(vector_id, {})
+        rationale = str(judgment.get("rationale", "")).strip() or "Evidence remains mixed for this claim."
+        report = vector_reports.get(vector_id, {}) if isinstance(vector_reports, dict) else {}
+        actions = [str(item).strip() for item in report.get("author_action_plan", []) if str(item).strip()]
+        skeptic_conclusion = str(report.get("skeptic_conclusion", "")).strip()
+        advocate_conclusion = str(report.get("advocate_conclusion", "")).strip()
+        patch_instruction = _extract_patch_instruction(syntheses.get(vector_id, ""))
+
+        what_to_change = patch_instruction or (
+            actions[0]
+            if actions
+            else "Rewrite the claim sentence so the scope and evidence are explicitly aligned."
+        )
+        why_it_matters = (
+            f"Judge outcome is `{verdict}` and the unresolved risk is: {rationale}"
+            if verdict == "contested"
+            else f"Judge outcome is `{verdict}`; this edit preserves strengths while reducing reviewer risk."
+        )
+        skeptic_point = skeptic_conclusion or "Current framing still appears broader than direct evidence support."
+        advocate_point = advocate_conclusion or "Core contribution can stand when claim language is explicitly bounded."
+        implementation_steps = actions[:3] if actions else [
+            "Edit the claim sentence to name the exact evaluated setting.",
+            "Add one explicit quantitative comparator next to the claim.",
+            "Add one limitation sentence that bounds generalization beyond measured data.",
+        ]
+
+        block_lines = [
+            f"- **Claim {idx} ({vector_id})**: {claim}",
+            f"  - What to change: {what_to_change}",
+            f"  - Why it matters: {why_it_matters}",
+            f"  - Skeptic concern to resolve: {skeptic_point}",
+            f"  - Advocate condition to preserve: {advocate_point}",
+            "  - Implementation steps:",
+        ]
+        block_lines.extend(f"    1. {step}" for step in implementation_steps)
+        guidance.append("\n".join(block_lines))
+    return guidance
+
+
+def _build_current_vector_report(
+    *,
+    active_vector: dict[str, Any],
+    skeptic_position: str,
+    advocate_position: str,
+    debate_history: list[dict[str, Any]],
+    documents: list[Document],
+    existing_report: dict[str, Any],
+) -> dict[str, Any]:
+    skeptic = (skeptic_position or "").strip()
+    advocate = (advocate_position or "").strip()
+    if not skeptic or not advocate:
+        return existing_report if isinstance(existing_report, dict) else {}
+
+    fingerprint = _normalize_turn_text(skeptic) + "||" + _normalize_turn_text(advocate)
+    if isinstance(existing_report, dict) and existing_report.get("fingerprint") == fingerprint:
+        return existing_report
+
+    fallback = _fallback_current_vector_report(
+        active_vector=active_vector,
+        skeptic_position=skeptic,
+        advocate_position=advocate,
+    )
+    fallback["fingerprint"] = fingerprint
+    if not text_service.available:
+        return fallback
+
+    vector_id = str(active_vector.get("id", "V?"))
+    claim = str(active_vector.get("claim", "")).strip() or "active claim"
+    try:
+        response = text_service.generate(
+            system_prompt=(
+                "You are a debate analyst for a paper reviewer panel.\n"
+                "Return JSON only with keys:\n"
+                "agreements (array), disagreements (array), common_points (array),\n"
+                "skeptic_conclusion (string), advocate_conclusion (string),\n"
+                "joint_conclusion (string), author_action_plan (array).\n"
+                "Keep output concrete and grounded in the two arguments."
+            ),
+            user_prompt=(
+                f"Vector: {vector_id} | Claim: {claim}\n\n"
+                f"Skeptic:\n{skeptic}\n\n"
+                f"Advocate:\n{advocate}\n\n"
+                "Recent debate transcript:\n"
+                f"{_format_vector_history_compact(debate_history=debate_history, vector_id=vector_id, max_turns=6)}\n\n"
+                "Retrieved context:\n"
+                f"{_format_context(documents, max_docs=3)}"
+            ),
+            temperature=0.1,
+            max_output_tokens=360,
+        )
+        payload = _try_parse_json_payload(response)
+        if isinstance(payload, dict):
+            report = {
+                "agreements": [str(item).strip() for item in payload.get("agreements", []) if str(item).strip()],
+                "disagreements": [str(item).strip() for item in payload.get("disagreements", []) if str(item).strip()],
+                "common_points": [str(item).strip() for item in payload.get("common_points", []) if str(item).strip()],
+                "skeptic_conclusion": str(payload.get("skeptic_conclusion", "")).strip(),
+                "advocate_conclusion": str(payload.get("advocate_conclusion", "")).strip(),
+                "joint_conclusion": str(payload.get("joint_conclusion", "")).strip(),
+                "author_action_plan": [
+                    str(item).strip() for item in payload.get("author_action_plan", []) if str(item).strip()
+                ],
+                "fingerprint": fingerprint,
+            }
+            if report["skeptic_conclusion"] and report["advocate_conclusion"] and report["joint_conclusion"]:
+                if not report["agreements"]:
+                    report["agreements"] = fallback["agreements"]
+                if not report["disagreements"]:
+                    report["disagreements"] = fallback["disagreements"]
+                if not report["common_points"]:
+                    report["common_points"] = fallback["common_points"]
+                if not report["author_action_plan"]:
+                    report["author_action_plan"] = fallback["author_action_plan"]
+                return report
+    except Exception:
+        pass
+    return fallback
+
+
+def _fallback_current_vector_report(
+    *,
+    active_vector: dict[str, Any],
+    skeptic_position: str,
+    advocate_position: str,
+) -> dict[str, Any]:
+    claim = str(active_vector.get("claim", "")).strip() or "the active claim"
+    return {
+        "agreements": [
+            "Both reviewers agree the claim should be bounded to directly measured evidence.",
+            "Both sides agree clearer wording improves credibility.",
+        ],
+        "disagreements": [
+            "Skeptic argues current evidence is insufficient for the full claim strength.",
+            "Advocate argues the claim is defendable once scope is explicit.",
+        ],
+        "common_points": [
+            "Evidence exists for feasibility.",
+            "Claim wording should match measured scope.",
+        ],
+        "skeptic_conclusion": f"The paper overstates {claim.lower()} without enough direct support.",
+        "advocate_conclusion": f"The paper can keep {claim.lower()} if scope is narrowed to measured settings.",
+        "joint_conclusion": "Promising contribution, but strongest claims need tighter evidence-aligned framing.",
+        "author_action_plan": [
+            "Rewrite claim language to match reported setup and measurements.",
+            "Add one explicit metric/baseline comparator in the same paragraph as the claim.",
+            "State one explicit limitation boundary adjacent to the claim.",
+        ],
+    }
+
+
+def _render_current_vector_report_markdown(report: dict[str, Any]) -> str:
+    agreements = report.get("agreements", [])
+    disagreements = report.get("disagreements", [])
+    common_points = report.get("common_points", [])
+    actions = report.get("author_action_plan", [])
+    lines = ["Shared Ground:"]
+    if isinstance(agreements, list) and agreements:
+        lines.extend(f"- {str(item).strip()}" for item in agreements if str(item).strip())
+    else:
+        lines.append("- No explicit agreements yet.")
+    lines.extend(["", "Core Disagreement:"])
+    if isinstance(disagreements, list) and disagreements:
+        lines.extend(f"- {str(item).strip()}" for item in disagreements if str(item).strip())
+    else:
+        lines.append("- No explicit disagreements yet.")
+    lines.extend(["", "Alignment Signals:"])
+    if isinstance(common_points, list) and common_points:
+        lines.extend(f"- {str(item).strip()}" for item in common_points if str(item).strip())
+    else:
+        lines.append("- No common ground identified yet.")
+    lines.extend(
+        [
+            "",
+            "Joint Conclusion:",
+            str(report.get("joint_conclusion", "Not available.")).strip(),
+            "",
+            "Action Plan:",
+        ]
+    )
+    if isinstance(actions, list) and actions:
+        lines.extend(f"- {str(item).strip()}" for item in actions if str(item).strip())
+    else:
+        lines.append("- No action plan available.")
+    return "\n".join(lines).strip()
+
+
+def _render_current_vector_report_brief(report: dict[str, Any]) -> str:
+    agreements = [str(item).strip() for item in report.get("agreements", []) if str(item).strip()]
+    disagreements = [str(item).strip() for item in report.get("disagreements", []) if str(item).strip()]
+    common_points = [str(item).strip() for item in report.get("common_points", []) if str(item).strip()]
+    actions = [str(item).strip() for item in report.get("author_action_plan", []) if str(item).strip()]
+
+    lines: list[str] = []
+    if agreements:
+        lines.append(f"- Agreement: {agreements[0]}")
+    if disagreements:
+        lines.append(f"- Main disagreement: {disagreements[0]}")
+    if common_points:
+        lines.append(f"- Common ground: {common_points[0]}")
+    joint = str(report.get("joint_conclusion", "")).strip()
+    if joint:
+        lines.append(f"- Joint conclusion: {joint}")
+    if actions:
+        lines.append("- Immediate action plan:")
+        for item in actions[:2]:
+            lines.append(f"  - {item}")
+    if not lines:
+        return "No intelligence summary available yet."
+    return "\n".join(lines).strip()
+
+
+def _render_round_events_compact(*, round_events: list[dict[str, Any]], vector_id: str) -> str:
+    if not round_events:
+        return "No new debate turns in this round."
+    lines: list[str] = []
+    for event in round_events:
+        if str(event.get("vector_id", "")) != vector_id:
+            continue
+        speaker = str(event.get("speaker", "")).strip().lower()
+        if speaker not in {"skeptic", "advocate"}:
+            continue
+        label = "Skeptic" if speaker == "skeptic" else "Advocate"
+        content = _compact_turn_text(str(event.get("content", "")), max_chars=280)
+        if not content:
+            continue
+        lines.append(f"- **{label}:** {content}")
+    return "\n".join(lines) if lines else "No new debate turns in this round."
+
+
+def _build_reviewer_final_report(
+    *,
+    attack_vectors: list[dict[str, Any]],
+    vector_verdicts: dict[str, str],
+    vector_judgments: dict[str, dict[str, Any]],
+    vector_reports: dict[str, dict[str, Any]],
+    syntheses: dict[str, str],
+    debate_history: list[dict[str, Any]],
+    documents: list[Document],
+) -> dict[str, Any]:
+    fallback = _fallback_reviewer_final_report(
+        attack_vectors=attack_vectors,
+        vector_verdicts=vector_verdicts,
+        vector_judgments=vector_judgments,
+        vector_reports=vector_reports,
+        syntheses=syntheses,
+    )
+    if not text_service.available:
+        return fallback
+    try:
+        response = text_service.generate(
+            system_prompt=(
+                "You are generating a final panel report for a two-reviewer paper debate.\n"
+                "Return JSON only with keys:\n"
+                "overview (string), agreements (array of strings), disagreements (array of strings),\n"
+                "common_points (array of strings), skeptic_conclusion (string), advocate_conclusion (string),\n"
+                "joint_conclusion (string), final_suggestions (array of strings), final_decision (string), confidence (number 0..1).\n"
+                "Requirements: concise, evidence-grounded, no generic filler."
+            ),
+            user_prompt=(
+                "Attack vectors with verdicts:\n"
+                f"{json.dumps(vector_verdicts)}\n\n"
+                "Judge rationales:\n"
+                f"{json.dumps({k: v.get('rationale', '') for k, v in vector_judgments.items()})}\n\n"
+                "Per-vector intelligence reports:\n"
+                f"{json.dumps(vector_reports)}\n\n"
+                "Rewrite cards:\n"
+                f"{json.dumps(syntheses)}\n\n"
+                "Debate transcript excerpt:\n"
+                f"{_format_panel_history_compact(debate_history=debate_history, max_turns=14)}\n\n"
+                "Retrieved context:\n"
+                f"{_format_context(documents, max_docs=4)}"
+            ),
+            temperature=0.1,
+            max_output_tokens=520,
+        )
+        payload = _try_parse_json_payload(response)
+        if isinstance(payload, dict):
+            report = {
+                "overview": str(payload.get("overview", "")).strip(),
+                "agreements": [str(item).strip() for item in payload.get("agreements", []) if str(item).strip()],
+                "disagreements": [str(item).strip() for item in payload.get("disagreements", []) if str(item).strip()],
+                "common_points": [str(item).strip() for item in payload.get("common_points", []) if str(item).strip()],
+                "skeptic_conclusion": str(payload.get("skeptic_conclusion", "")).strip(),
+                "advocate_conclusion": str(payload.get("advocate_conclusion", "")).strip(),
+                "joint_conclusion": str(payload.get("joint_conclusion", "")).strip(),
+                "final_suggestions": [
+                    str(item).strip() for item in payload.get("final_suggestions", []) if str(item).strip()
+                ],
+                "final_decision": str(payload.get("final_decision", "")).strip(),
+                "confidence": float(payload.get("confidence", 0.55)),
+            }
+            report["confidence"] = max(0.0, min(1.0, report["confidence"]))
+            if report["overview"] and report["final_decision"]:
+                if not report["agreements"]:
+                    report["agreements"] = fallback["agreements"]
+                if not report["disagreements"]:
+                    report["disagreements"] = fallback["disagreements"]
+                if not report["common_points"]:
+                    report["common_points"] = fallback["common_points"]
+                if not report["skeptic_conclusion"]:
+                    report["skeptic_conclusion"] = fallback["skeptic_conclusion"]
+                if not report["advocate_conclusion"]:
+                    report["advocate_conclusion"] = fallback["advocate_conclusion"]
+                if not report["joint_conclusion"]:
+                    report["joint_conclusion"] = fallback["joint_conclusion"]
+                if not report["final_suggestions"]:
+                    report["final_suggestions"] = fallback["final_suggestions"]
+                return report
+    except Exception:
+        pass
+    return fallback
+
+
+def _fallback_reviewer_final_report(
+    *,
+    attack_vectors: list[dict[str, Any]],
+    vector_verdicts: dict[str, str],
+    vector_judgments: dict[str, dict[str, Any]],
+    vector_reports: dict[str, dict[str, Any]],
+    syntheses: dict[str, str],
+) -> dict[str, Any]:
+    skeptic_wins = sum(1 for verdict in vector_verdicts.values() if verdict == "skeptic_prevailed")
+    advocate_wins = sum(1 for verdict in vector_verdicts.values() if verdict == "advocate_prevailed")
+    contested = sum(1 for verdict in vector_verdicts.values() if verdict == "contested")
+    total = max(1, len(vector_verdicts))
+
+    agreements: list[str] = []
+    disagreements: list[str] = []
+    common_points: list[str] = []
+    suggestions: list[str] = []
+    for vector in attack_vectors:
+        vector_id = str(vector.get("id", ""))
+        claim = str(vector.get("claim", "")).strip()
+        verdict = str(vector_verdicts.get(vector_id, "contested"))
+        rationale = str(vector_judgments.get(vector_id, {}).get("rationale", "")).strip()
+        if verdict == "advocate_prevailed":
+            line = f"{vector_id}: reviewers converged that this claim is sufficiently supported."
+            if rationale:
+                line = f"{line} {rationale}".strip()
+            agreements.append(line)
+        elif verdict == "skeptic_prevailed":
+            line = f"{vector_id}: skeptic challenge held; support was weaker than framing."
+            if rationale:
+                line = f"{line} {rationale}".strip()
+            disagreements.append(line)
+        else:
+            line = f"{vector_id}: remained contested and needs clearer evidence framing."
+            if rationale:
+                line = f"{line} {rationale}".strip()
+            disagreements.append(line)
+        patch = _extract_patch_instruction(syntheses.get(vector_id, ""))
+        if patch:
+            suggestions.append(patch)
+        elif claim:
+            suggestions.append(f"Tighten claim wording for {vector_id} and add one concrete metric/baseline reference.")
+
+    if not agreements:
+        agreements.append("Both sides agreed that clearer scope boundaries improve claim credibility.")
+    if not disagreements:
+        disagreements.append("No major unresolved disagreements were recorded.")
+    if vector_reports:
+        for report in vector_reports.values():
+            points = report.get("common_points", [])
+            if not isinstance(points, list):
+                continue
+            for point in points:
+                text = str(point).strip()
+                if text and text not in common_points:
+                    common_points.append(text)
+                    if len(common_points) >= 5:
+                        break
+            if len(common_points) >= 5:
+                break
+    if not common_points:
+        common_points.append("The contribution is promising, but strongest claims need tighter evidence alignment.")
+    if not suggestions:
+        suggestions.append("Convert each debated claim into one scoped statement tied to a measurable comparator.")
+
+    if skeptic_wins > advocate_wins:
+        decision = "Weak Reject until major claim-overreach and evidence gaps are revised."
+    elif advocate_wins > skeptic_wins and skeptic_wins == 0:
+        decision = "Weak Accept with targeted clarity edits."
+    else:
+        decision = "Borderline: promising contribution, but contested claims need tighter evidence framing."
+
+    return {
+        "overview": (
+            f"Panel completed {total} claim trials: skeptic_prevailed={skeptic_wins}, "
+            f"advocate_prevailed={advocate_wins}, contested={contested}."
+        ),
+        "agreements": agreements[:4],
+        "disagreements": disagreements[:5],
+        "common_points": common_points[:5],
+        "skeptic_conclusion": "Skeptic view: major risks are overclaiming and insufficient direct support for broader statements.",
+        "advocate_conclusion": "Advocate view: core contribution stands when claims are explicitly scoped to measured evidence.",
+        "joint_conclusion": "Joint panel view: strong potential, but claim wording and evidence linking need tightening before acceptance.",
+        "final_suggestions": suggestions[:6],
+        "final_decision": decision,
+        "confidence": max(0.35, min(0.9, 0.5 + ((advocate_wins - skeptic_wins) * 0.08))),
+    }
+
+
+def _extract_patch_instruction(card: str) -> str:
+    text = (card or "").strip()
+    if not text:
+        return ""
+    match = re.search(r"Patch Instruction:\s*(.+)", text, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    lines = [line.strip("- ").strip() for line in text.splitlines() if line.strip()]
+    return lines[0] if lines else ""
+
+
+def _render_reviewer_final_report_markdown(report: dict[str, Any]) -> str:
+    agreements = report.get("agreements", [])
+    disagreements = report.get("disagreements", [])
+    suggestions = report.get("final_suggestions", [])
+    confidence = float(report.get("confidence", 0.0))
+    lines = [
+        "## Final Debate Report",
+        str(report.get("overview", "Final panel summary is ready.")).strip(),
+        "",
+        "### Agreements",
+    ]
+    if isinstance(agreements, list) and agreements:
+        lines.extend(f"- {str(item).strip()}" for item in agreements if str(item).strip())
+    else:
+        lines.append("- No explicit agreements captured.")
+    lines.extend(["", "### Major Disagreements"])
+    if isinstance(disagreements, list) and disagreements:
+        lines.extend(f"- {str(item).strip()}" for item in disagreements if str(item).strip())
+    else:
+        lines.append("- No major disagreements captured.")
+    lines.extend(["", "### Final Suggestions"])
+    if isinstance(suggestions, list) and suggestions:
+        lines.extend(f"- {str(item).strip()}" for item in suggestions if str(item).strip())
+    else:
+        lines.append("- No final suggestions captured.")
+    lines.extend(
+        [
+            "",
+            "### Final Decision",
+            str(report.get("final_decision", "Decision not available.")).strip(),
+            f"Confidence: {confidence:.2f}",
+        ]
+    )
+    return "\n".join(lines).strip()
+
+
+def _format_panel_history_compact(*, debate_history: list[dict[str, Any]], max_turns: int) -> str:
+    if not debate_history:
+        return "No prior turns."
+    trimmed = debate_history[-max_turns:]
+    lines: list[str] = []
+    for item in trimmed:
+        speaker = str(item.get("speaker", "unknown")).upper()
+        vector_id = str(item.get("vector_id", "")).strip()
+        prefix = f"[{vector_id}] " if vector_id else ""
+        content = _compact_turn_text(str(item.get("content", "")), max_chars=220)
+        if not content:
+            continue
+        lines.append(f"{speaker}: {prefix}{content}")
+    return "\n".join(lines) if lines else "No prior turns."
+
+
 def _human_next_move(*, next_speaker: str, vector_id: str) -> str:
     if next_speaker == "skeptic":
-        return f"Skeptic will press the strongest unresolved point on {vector_id}."
+        return "The skeptic will challenge the weakest unresolved evidence next."
     if next_speaker == "advocate":
-        return f"Advocate will rebut the latest challenge on {vector_id}."
+        return "The advocate will respond to the latest criticism next."
     if next_speaker == "synthesise":
-        return f"The current debate on {vector_id} is ready for synthesis."
-    return "User intervention requested to break a deadlock or steer the debate."
+        return "This claim is ready for a final rewrite recommendation."
+    return "Your input is needed to break the tie or redirect the debate."
 
 
 def _try_parse_json_payload(text: str) -> Any:
@@ -2962,6 +4667,8 @@ def _anchor_terms_for_query(query: str) -> set[str]:
         anchors.update({"ocr", "easyocr"})
     if "precision" in lower and "recall" in lower:
         anchors.update({"precision", "recall"})
+    if _is_math_intent_query(query):
+        anchors.update({"equation", "objective", "loss", "formulation"})
     if not anchors:
         return anchors
     return {token for token in anchors if token not in {"the", "a", "an", "and"}}
@@ -2970,6 +4677,9 @@ def _anchor_terms_for_query(query: str) -> set[str]:
 def _insufficient_local_grounding(*, query: str, documents: list[Document]) -> bool:
     if not documents:
         return True
+    if _is_math_intent_query(query):
+        # Math/derivation asks often use varied terminology; avoid over-pruning these.
+        return False
     anchor_terms = _anchor_terms_for_query(query)
     if not anchor_terms:
         return False
@@ -3049,7 +4759,22 @@ def _looks_like_high_signal_section(text: str) -> bool:
     return any(marker in header_window for marker in markers)
 
 
-def _low_signal_penalty(text: str) -> float:
+def _looks_math_dense_chunk(text: str) -> bool:
+    lower = (text or "").lower()
+    if not lower:
+        return False
+    if any(marker in lower for marker in ("equation", "formulated as", "objective", "loss", "where")):
+        return True
+    if re.search(r"\bl(?:pretrain|aux|1|2)\b", lower):
+        return True
+    if re.search(r"\btop[-\s]?k\b", lower):
+        return True
+    if re.search(r"\b\w+\s*=\s*[^=]+", lower):
+        return True
+    return False
+
+
+def _low_signal_penalty(text: str, *, allow_numeric_dense: bool = False) -> float:
     lower = (text or "").lower()
     penalty = 0.0
     boilerplate_markers = (
@@ -3066,7 +4791,7 @@ def _low_signal_penalty(text: str) -> float:
     tokens = re.findall(r"[a-zA-Z0-9_]+", lower)
     if tokens:
         numeric_ratio = sum(1 for token in tokens if token.isdigit()) / len(tokens)
-        if numeric_ratio > 0.38:
+        if numeric_ratio > 0.38 and not (allow_numeric_dense and _looks_math_dense_chunk(text)):
             penalty += 0.25
     return penalty
 
@@ -3251,6 +4976,50 @@ def _select_citations_for_answer(
     else:
         fallback_limit = 0
     return citations[: min(fallback_limit, len(citations))]
+
+
+def _citation_identity(citation: dict[str, Any]) -> str:
+    return f"{citation.get('paper_id','')}|{citation.get('chunk_id','')}|{citation.get('page','')}"
+
+
+def _reindex_answer_citations(
+    *,
+    answer: str,
+    raw_citations: list[dict[str, Any]],
+    selected_citations: list[dict[str, Any]],
+) -> str:
+    text = answer or ""
+    if not _has_inline_citations(text):
+        return text
+    if not selected_citations:
+        return _strip_inline_reference_markers(text)
+
+    key_to_new_index: dict[str, int] = {}
+    for index, citation in enumerate(selected_citations, start=1):
+        key_to_new_index[_citation_identity(citation)] = index
+
+    old_to_new: dict[int, int] = {}
+    for index, citation in enumerate(raw_citations or [], start=1):
+        new_index = key_to_new_index.get(_citation_identity(citation))
+        if new_index is not None:
+            old_to_new[index] = new_index
+
+    def _replace(match: re.Match[str]) -> str:
+        token = match.group(1)
+        if not token.isdigit():
+            return ""
+        old_index = int(token)
+        new_index = old_to_new.get(old_index)
+        if new_index is None:
+            return ""
+        return f"[{new_index}]"
+
+    reindexed = re.sub(r"\[([0-9]+)\]", _replace, text)
+    reindexed = re.sub(r"(\[[0-9]+\])(?:\s*\1)+", r"\1", reindexed)
+    reindexed = re.sub(r"\s+([,.;:])", r"\1", reindexed)
+    reindexed = re.sub(r"[ \t]{2,}", " ", reindexed)
+    reindexed = re.sub(r"\n{3,}", "\n\n", reindexed)
+    return reindexed.strip()
 
 
 def _temperature_for_mode(mode: Mode) -> float:

@@ -28,6 +28,9 @@ class GraphState(TypedDict, total=False):
     turn_count: int
     syntheses: dict[str, str]
     vector_verdicts: dict[str, str]
+    vector_judgments: dict[str, dict[str, Any]]
+    vector_reports: dict[str, dict[str, Any]]
+    final_report: dict[str, Any]
     next_speaker: str
     intervention_mode: str
     vectors_remaining: list[str]

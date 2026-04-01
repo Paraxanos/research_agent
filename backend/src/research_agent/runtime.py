@@ -182,18 +182,27 @@ class ResearchAgentRuntime:
             top = self._compact_snippet(hits[0].snippet)
             if request.mode == Mode.REVIEWER:
                 answer = (
-                    "## Reviewer Arena\n"
-                    "Fallback review response\n\n"
-                    f"- Strongest grounded evidence: {top} [1]\n"
-                    "- Provisional concern: clarify evidence boundaries and quantify one key claim [1].\n"
-                    "- Action: revise the target paragraph to include one concrete metric and explicit scope language.\n"
+                    "## Claim Trial Engine\n"
+                    "Fallback trial response\n\n"
+                    f"### Skeptic\n- Strongest grounded concern signal: {top} [1]\n\n"
+                    "### Advocate\n- Partial defense exists, but scope wording should be tightened [1].\n\n"
+                    "### Evidence-only Judge\n- Verdict: contested\n- Rationale: fallback context is too shallow for a decisive ruling [1].\n\n"
+                    "### Rewrite Compiler Card\n"
+                    "Target Section: contribution/claim paragraph\n"
+                    "Patch Instruction: add one concrete metric comparator and explicit scope boundary.\n"
                 )
             elif request.mode == Mode.COMPARATOR and len(hits) >= 2:
                 second = self._compact_snippet(hits[1].snippet)
                 answer = (
-                    f"Paper 1 evidence: {top} [1]\n\n"
-                    f"Paper 2 evidence: {second} [2]\n\n"
-                    "Use these excerpts as the grounded baseline comparison."
+                    "## Papers Compared\n"
+                    "- Paper 1\n- Paper 2\n\n"
+                    "## Claim Matrix\n"
+                    f"- Paper 1 claim signal: {top} [1]\n"
+                    f"- Paper 2 claim signal: {second} [2]\n\n"
+                    "## Conflict Map\n"
+                    "- Agreements/contradictions are uncertain in runtime-safe fallback mode.\n\n"
+                    "## Decision By Use Case\n"
+                    "- Use this as a provisional grounding snapshot only; rerun for full comparator synthesis."
                 )
             else:
                 answer = f"Based on the uploaded papers: {top} [1]"

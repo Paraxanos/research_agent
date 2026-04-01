@@ -15,6 +15,7 @@ const CSS = `
   .ra-btn { background: rgba(20,30,51,.92); color: #dbe7ff; padding: 12px 14px; border-radius: 16px; text-align: left; cursor: pointer; }
   .ra-list { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; }
   .ra-chip { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 10px 12px; border-radius: 14px; background: rgba(18,28,48,.82); color: #afbdd7; }
+  .ra-chip.selected { background: rgba(244,114,182,.14); border-color: rgba(244,114,182,.45); }
   .ra-chip-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ra-dot { width: 9px; height: 9px; border-radius: 999px; background: linear-gradient(135deg, #79a3ff, #9de3ff); box-shadow: 0 0 0 4px rgba(121,163,255,.12); }
   .ra-x { border: none; background: transparent; color: #8ea3c8; cursor: pointer; }
@@ -32,6 +33,14 @@ const CSS = `
   .ra-badge { padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,.04); border: 1px solid rgba(166,186,228,.12); }
   .ra-sub { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 18px; border-radius: 18px; background: rgba(12,19,34,.86); color: #9eb0d4; }
   .ra-select { min-width: 260px; padding: 10px 12px; border-radius: 12px; background: rgba(19,29,48,.95); color: #edf4ff; }
+  .ra-sub-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .ra-inline-papers { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ra-inline-paper { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(149,170,210,.22); background: rgba(20,30,51,.8); color: #c6d5f0; font-size: 12px; cursor: pointer; max-width: 320px; }
+  .ra-inline-paper.selected { border-color: rgba(244,114,182,.6); background: rgba(244,114,182,.2); color: #ffe3f2; }
+  .ra-inline-paper-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ra-inline-actions { display: flex; align-items: center; gap: 8px; }
+  .ra-inline-btn { border: 1px solid rgba(149,170,210,.24); background: rgba(20,30,51,.88); color: #d7e4fb; border-radius: 999px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  .ra-inline-btn:disabled { opacity: .45; cursor: not-allowed; }
   .ra-panel { position: relative; flex: 1; min-height: 0; overflow: hidden; border-radius: 28px; background: linear-gradient(180deg, rgba(11,18,32,.9), rgba(12,20,35,.96)); box-shadow: 0 24px 60px rgba(0,0,0,.24); }
   .ra-grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(126,159,219,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(126,159,219,.05) 1px, transparent 1px); background-size: 26px 26px; mask-image: linear-gradient(180deg, rgba(0,0,0,.85), rgba(0,0,0,.2)); }
   .ra-scroll { position: absolute; inset: 0; overflow: auto; padding: 22px; }
@@ -49,6 +58,47 @@ const CSS = `
   .ra-tag { margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
   .ra-user-bubble { padding: 12px 16px; border-radius: 18px 18px 6px 18px; color: white; white-space: pre-wrap; line-height: 1.55; }
   .ra-assistant-bubble { padding: 16px; border-radius: 18px 18px 18px 6px; background: #181c2e; color: #f3f8ff; white-space: pre-wrap; line-height: 1.6; }
+  .ra-assistant-bubble.reviewer { background: linear-gradient(160deg, rgba(27,22,14,.96), rgba(26,29,47,.96)); border: 1px solid rgba(251,146,60,.28); box-shadow: inset 0 0 0 1px rgba(251,146,60,.08); }
+  .ra-assistant-bubble.reviewer .ra-md-h2 { color: #ffd9b3; }
+  .ra-assistant-bubble.reviewer .ra-md-h3 { color: #ffe7ce; }
+  .ra-assistant-bubble.reviewer .ra-md-p { color: #fde8d4; }
+  .ra-assistant-bubble.reviewer .ra-md-ul li { color: #f7dcc0; }
+  .ra-review-live { margin-bottom: 12px; border-radius: 14px; border: 1px solid rgba(251,146,60,.3); background: rgba(39,26,14,.55); padding: 10px; }
+  .ra-review-live-head { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: #ffd7ac; margin-bottom: 8px; }
+  .ra-review-live-list { display: grid; gap: 8px; }
+  .ra-review-turn { border-radius: 10px; border: 1px solid rgba(149,170,210,.22); background: rgba(11,17,31,.72); padding: 8px 10px; }
+  .ra-review-turn.skeptic { border-color: rgba(251,146,60,.45); }
+  .ra-review-turn.advocate { border-color: rgba(96,165,250,.45); }
+  .ra-review-turn.judge { border-color: rgba(52,211,153,.45); }
+  .ra-review-turn.synthesise { border-color: rgba(244,114,182,.45); }
+  .ra-review-turn-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .ra-review-turn-role { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: #f5dcc0; }
+  .ra-review-turn-turn { font-size: 11px; color: #9cb0d4; }
+  .ra-review-turn-text { font-size: 12px; line-height: 1.5; color: #e8f1ff; white-space: pre-wrap; }
+  .ra-review-report { margin-bottom: 14px; border-radius: 16px; border: 1px solid rgba(251,146,60,.35); background: linear-gradient(145deg, rgba(55,33,13,.92), rgba(24,27,44,.94)); padding: 14px; box-shadow: 0 16px 28px rgba(0,0,0,.24); }
+  .ra-review-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .ra-review-title { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: #ffd9b5; }
+  .ra-review-chip { padding: 4px 9px; border-radius: 999px; border: 1px solid rgba(253,186,116,.4); background: rgba(253,186,116,.12); color: #ffd7aa; font-size: 11px; font-weight: 700; }
+  .ra-review-overview { font-size: 13px; color: #fde7cf; line-height: 1.55; margin-bottom: 10px; }
+  .ra-review-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin-bottom: 10px; }
+  .ra-review-col { border-radius: 12px; border: 1px solid rgba(149,170,210,.22); background: rgba(15,20,35,.78); padding: 10px; }
+  .ra-review-col h4 { margin: 0 0 8px 0; font-size: 12px; color: #e8f0ff; text-transform: uppercase; letter-spacing: .07em; }
+  .ra-review-col ul { margin: 0; padding-left: 16px; }
+  .ra-review-col li { margin: 0 0 6px 0; font-size: 12px; color: #cfddf8; line-height: 1.45; }
+  .ra-review-decision { border-radius: 12px; border: 1px solid rgba(52,211,153,.35); background: rgba(11,41,34,.68); padding: 10px; }
+  .ra-review-decision-title { margin: 0 0 6px 0; font-size: 12px; color: #b5f3dc; text-transform: uppercase; letter-spacing: .07em; font-weight: 700; }
+  .ra-review-decision-text { font-size: 13px; color: #e6fff4; line-height: 1.5; }
+  @media (max-width: 860px) { .ra-review-grid { grid-template-columns: 1fr; } }
+  .ra-assistant-bubble .ra-md { white-space: normal; }
+  .ra-md-h1, .ra-md-h2, .ra-md-h3 { margin: 0 0 10px 0; font-weight: 700; color: #f7fbff; line-height: 1.35; }
+  .ra-md-h1 { font-size: 20px; }
+  .ra-md-h2 { font-size: 18px; }
+  .ra-md-h3 { font-size: 16px; }
+  .ra-md-p { margin: 0 0 10px 0; color: #dce8ff; line-height: 1.6; }
+  .ra-md-ul, .ra-md-ol { margin: 0 0 10px 20px; padding: 0; color: #dce8ff; }
+  .ra-md-ul li, .ra-md-ol li { margin: 0 0 6px 0; line-height: 1.55; }
+  .ra-md-strong { color: #ffffff; font-weight: 700; }
+  .ra-md-code { padding: 1px 6px; border-radius: 6px; background: rgba(96,165,250,.2); border: 1px solid rgba(96,165,250,.38); color: #cfe3ff; font-family: "IBM Plex Mono","Consolas",monospace; font-size: 12px; }
   .ra-cites { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(145,164,203,.14); }
   .ra-cites-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .ra-cites-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #9cb3da; font-weight: 700; }
@@ -64,6 +114,9 @@ const CSS = `
   .ra-dots { display: flex; gap: 8px; padding-left: 24px; }
   .ra-pulse { width: 8px; height: 8px; border-radius: 999px; animation: raPulse 1.2s infinite ease-in-out; }
   .ra-inputbar { display: flex; align-items: flex-end; gap: 14px; padding: 16px 18px; border-radius: 24px; background: rgba(12,19,34,.92); border: 1px solid rgba(145,164,203,.12); }
+  .ra-quickbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 2px -4px 2px; }
+  .ra-quickbtn { border: 1px solid rgba(149,170,210,.24); background: rgba(20,30,51,.88); color: #d7e4fb; border-radius: 999px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  .ra-quickbtn.active { border-color: rgba(244,114,182,.58); background: rgba(244,114,182,.2); color: #ffe3f2; }
   .ra-input { flex: 1; min-height: 56px; max-height: 120px; resize: none; padding: 16px 18px; border-radius: 18px; background: rgba(19,29,48,.95); color: #edf5ff; font: inherit; line-height: 1.5; }
   .ra-send { min-width: 120px; height: 56px; border-radius: 18px; color: #06101f; font-weight: 700; cursor: pointer; }
   @keyframes raPulse { 0%,80%,100% { transform: scale(.75); opacity: .35; } 40% { transform: scale(1); opacity: 1; } }
@@ -73,14 +126,21 @@ const MODES = [
   { id: "local", name: "Local Brain", glyph: "L", hex: "#60a5fa", desc: "Answers only from your papers" },
   { id: "global", name: "Global Brain", glyph: "G", hex: "#a78bfa", desc: "Full reasoning plus paper context" },
   { id: "writer", name: "Paper Writer", glyph: "W", hex: "#34d399", desc: "Drafts in your research voice" },
-  { id: "reviewer", name: "Reviewer", glyph: "R", hex: "#fb923c", desc: "Live skeptic vs advocate debate" },
-  { id: "comparator", name: "Comparator", glyph: "C", hex: "#f472b6", desc: "Compare up to three papers" },
+  { id: "reviewer", name: "Reviewer", glyph: "R", hex: "#fb923c", desc: "Claim trial engine with judge + rewrite cards" },
+  { id: "comparator", name: "Comparator", glyph: "C", hex: "#f472b6", desc: "Conflict map + verdict matrix across 2-3 papers" },
 ];
 const REVIEW_LENSES = [
   { id: "full", label: "Full Review" },
   { id: "novelty", label: "Novelty" },
   { id: "method", label: "Methods" },
 ];
+const COMPARATOR_QUICK_PROMPTS = [
+  { id: "full", label: "Full Verdict", text: "Run a full comparator pass with claim matrix, conflict map, benchmark verdict matrix, and decision by use case." },
+  { id: "conflict", label: "Conflict Map", text: "Focus on agreements, contradictions, and non-overlap across selected papers, then state what evidence resolves each conflict." },
+  { id: "synthesis", label: "Synthesis Plan", text: "Build a synthesis blueprint that combines the strongest parts of each paper and proposes one merged experiment." },
+];
+function comparatorPromptById(id) { return (COMPARATOR_QUICK_PROMPTS.find((preset) => preset.id === id) || COMPARATOR_QUICK_PROMPTS[0]).text; }
+function comparatorLabelById(id) { return (COMPARATOR_QUICK_PROMPTS.find((preset) => preset.id === id) || COMPARATOR_QUICK_PROMPTS[0]).label; }
 
 function modeOf(id) { return MODES.find((mode) => mode.id === id) || MODES[0]; }
 function sessionId() { return (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `session-${Date.now()}`; }
@@ -93,6 +153,23 @@ function buildReviewerPrompt(userPrompt, lensId) {
     return `[Start Debate] Focus lens: ${lens}`;
   }
   return trimmed;
+}
+function hasReviewerConversation(history) {
+  return (history || []).some((item) => item.role === "assistant" && item.mode === "reviewer");
+}
+function reviewerReportCompleted(debug) {
+  return !!(debug && debug.final_report_ready);
+}
+function hasReviewerCompletedConversation(history) {
+  return (history || []).some(
+    (item) =>
+      item.role === "assistant" &&
+      item.mode === "reviewer" &&
+      (
+        (item.debug && item.debug.final_report_ready) ||
+        String(item.content || "").includes("## Reviewer Complete Report")
+      ),
+  );
 }
 function normalizeSnippet(text) { return (text || "").replace(/\s+/g, " ").trim(); }
 function normalizeCitations(citations) {
@@ -120,6 +197,187 @@ function simplifyError(detail) {
   return text || "Request failed.";
 }
 
+function renderInlineSegments(text, keyPrefix = "seg") {
+  const raw = String(text || "");
+  const tokens = raw.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+  return tokens.map((token, index) => {
+    if (/^\*\*[^*]+\*\*$/.test(token)) {
+      return <strong key={`${keyPrefix}-b-${index}`} className="ra-md-strong">{token.slice(2, -2)}</strong>;
+    }
+    if (/^`[^`]+`$/.test(token)) {
+      return <code key={`${keyPrefix}-c-${index}`} className="ra-md-code">{token.slice(1, -1)}</code>;
+    }
+    return <React.Fragment key={`${keyPrefix}-t-${index}`}>{token}</React.Fragment>;
+  });
+}
+
+function renderAssistantMarkdown(content) {
+  const lines = String(content || "").split("\n");
+  const blocks = [];
+  let listType = null;
+  let listItems = [];
+  let key = 0;
+
+  const flushList = () => {
+    if (!listType || !listItems.length) return;
+    const Tag = listType === "ol" ? "ol" : "ul";
+    blocks.push(
+      <Tag key={`list-${key++}`} className={listType === "ol" ? "ra-md-ol" : "ra-md-ul"}>
+        {listItems.map((item, idx) => <li key={`li-${idx}`}>{renderInlineSegments(item, `li-${idx}`)}</li>)}
+      </Tag>,
+    );
+    listType = null;
+    listItems = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList();
+      continue;
+    }
+
+    const orderedMatch = trimmed.match(/^(\d+)\.\s+(.+)/);
+    if (orderedMatch) {
+      if (listType && listType !== "ol") flushList();
+      listType = "ol";
+      listItems.push(orderedMatch[2]);
+      continue;
+    }
+
+    const unorderedMatch = trimmed.match(/^[-*]\s+(.+)/);
+    if (unorderedMatch) {
+      if (listType && listType !== "ul") flushList();
+      listType = "ul";
+      listItems.push(unorderedMatch[1]);
+      continue;
+    }
+
+    flushList();
+
+    if (trimmed.startsWith("### ")) {
+      blocks.push(<h3 key={`h3-${key++}`} className="ra-md-h3">{renderInlineSegments(trimmed.slice(4), `h3-${key}`)}</h3>);
+      continue;
+    }
+    if (trimmed.startsWith("## ")) {
+      blocks.push(<h2 key={`h2-${key++}`} className="ra-md-h2">{renderInlineSegments(trimmed.slice(3), `h2-${key}`)}</h2>);
+      continue;
+    }
+    if (trimmed.startsWith("# ")) {
+      blocks.push(<h1 key={`h1-${key++}`} className="ra-md-h1">{renderInlineSegments(trimmed.slice(2), `h1-${key}`)}</h1>);
+      continue;
+    }
+    blocks.push(<p key={`p-${key++}`} className="ra-md-p">{renderInlineSegments(trimmed, `p-${key}`)}</p>);
+  }
+
+  flushList();
+  return <div className="ra-md">{blocks.length ? blocks : <p className="ra-md-p">{content}</p>}</div>;
+}
+
+function renderReviewerFinalReportCard(report) {
+  if (!report || typeof report !== "object") return null;
+  const agreements = Array.isArray(report.agreements) ? report.agreements.filter(Boolean) : [];
+  const disagreements = Array.isArray(report.disagreements) ? report.disagreements.filter(Boolean) : [];
+  const commonPoints = Array.isArray(report.common_points) ? report.common_points.filter(Boolean) : [];
+  const suggestions = Array.isArray(report.final_suggestions) ? report.final_suggestions.filter(Boolean) : [];
+  const confidence = Number.isFinite(Number(report.confidence)) ? Number(report.confidence) : null;
+
+  return (
+    <div className="ra-review-report">
+      <div className="ra-review-head">
+        <div className="ra-review-title">Final Debate Report</div>
+        <div className="ra-review-chip">{confidence !== null ? `confidence ${(confidence * 100).toFixed(0)}%` : "panel summary"}</div>
+      </div>
+      <div className="ra-review-overview">{report.overview || "Final panel summary is ready."}</div>
+      <div className="ra-review-grid">
+        <div className="ra-review-col">
+          <h4>Agreements</h4>
+          <ul>
+            {(agreements.length ? agreements : ["No explicit agreements captured."]).map((item, idx) => <li key={`agr-${idx}`}>{item}</li>)}
+          </ul>
+        </div>
+        <div className="ra-review-col">
+          <h4>Major Disagreements</h4>
+          <ul>
+            {(disagreements.length ? disagreements : ["No major disagreements captured."]).map((item, idx) => <li key={`dis-${idx}`}>{item}</li>)}
+          </ul>
+        </div>
+      </div>
+      <div className="ra-review-col" style={{ marginBottom: 10 }}>
+        <h4>Common Points</h4>
+        <ul>
+          {(commonPoints.length ? commonPoints : ["No common points captured."]).map((item, idx) => <li key={`cp-${idx}`}>{item}</li>)}
+        </ul>
+      </div>
+      <div className="ra-review-grid" style={{ marginBottom: 10 }}>
+        <div className="ra-review-col">
+          <h4>Skeptic Conclusion</h4>
+          <ul><li>{report.skeptic_conclusion || "Not available."}</li></ul>
+        </div>
+        <div className="ra-review-col">
+          <h4>Advocate Conclusion</h4>
+          <ul><li>{report.advocate_conclusion || "Not available."}</li></ul>
+        </div>
+      </div>
+      <div className="ra-review-col" style={{ marginBottom: 10 }}>
+        <h4>Joint Conclusion</h4>
+        <ul><li>{report.joint_conclusion || "Not available."}</li></ul>
+      </div>
+      <div className="ra-review-col" style={{ marginBottom: 10 }}>
+        <h4>Final Suggestions</h4>
+        <ul>
+          {(suggestions.length ? suggestions : ["No final suggestions captured."]).map((item, idx) => <li key={`sug-${idx}`}>{item}</li>)}
+        </ul>
+      </div>
+      <div className="ra-review-decision">
+        <div className="ra-review-decision-title">Final Decision</div>
+        <div className="ra-review-decision-text">{report.final_decision || "Decision not available."}</div>
+      </div>
+    </div>
+  );
+}
+
+function normalizeRoundEvents(debug) {
+  const raw = Array.isArray(debug?.round_events) ? debug.round_events : [];
+  return raw
+    .map((event) => ({
+      speaker: String(event?.speaker || "").trim().toLowerCase(),
+      vector_id: String(event?.vector_id || "").trim(),
+      turn: Number(event?.turn || 0),
+      content: String(event?.content || "").trim(),
+    }))
+    .filter((event) => ["skeptic", "advocate", "judge", "synthesise"].includes(event.speaker) && event.content);
+}
+
+function reviewerSpeakerLabel(speaker) {
+  if (speaker === "skeptic") return "Skeptic";
+  if (speaker === "advocate") return "Advocate";
+  if (speaker === "judge") return "Judge";
+  if (speaker === "synthesise") return "Rewrite Compiler";
+  return "Panel";
+}
+
+function renderReviewerRoundEvents(debug) {
+  const events = normalizeRoundEvents(debug);
+  if (!events.length) return null;
+  return (
+    <div className="ra-review-live">
+      <div className="ra-review-live-head">Live Debate Round</div>
+      <div className="ra-review-live-list">
+        {events.map((event, index) => (
+          <div key={`round-${event.speaker}-${event.turn || index}-${index}`} className={`ra-review-turn ${event.speaker}`}>
+            <div className="ra-review-turn-head">
+              <div className="ra-review-turn-role">{reviewerSpeakerLabel(event.speaker)}</div>
+              <div className="ra-review-turn-turn">{event.turn ? `Turn ${event.turn}` : "Structured event"}</div>
+            </div>
+            <div className="ra-review-turn-text">{renderInlineSegments(event.content, `round-${index}`)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 async function api(path, options) {
   const response = await fetch(path, options);
   if (!response.ok) {
@@ -141,6 +399,7 @@ function ResearchAgent() {
   const [selectedPaperIds, setSelectedPaperIds] = useState([]);
   const [reviewPaperId, setReviewPaperId] = useState("");
   const [reviewLens, setReviewLens] = useState("full");
+  const [comparatorPreset, setComparatorPreset] = useState("full");
   const reviewInterventionMode = "ask";
   const [history, setHistory] = useState([]);
   const [styleProfile, setStyleProfile] = useState({ active: false, profile: "", source_count: 0 });
@@ -159,6 +418,10 @@ function ResearchAgent() {
     }
     return {};
   }, [history]);
+  const reviewerCompleted = useMemo(
+    () => reviewerReportCompleted(reviewerDebug) || hasReviewerCompletedConversation(history),
+    [reviewerDebug, history],
+  );
 
   useEffect(() => {
     const style = document.createElement("style");
@@ -209,9 +472,6 @@ function ResearchAgent() {
   function switchMode(modeId) {
     if (modeId === activeMode) return;
     setActiveMode(modeId);
-    if (modeId === "comparator" && selectedPaperIds.length < 2 && papers.length >= 2) {
-      setSelectedPaperIds(papers.slice(0, 2).map((paper) => paper.paper_id));
-    }
     setHistory((current) => current.concat({ type: "divider", id: `${Date.now()}-${modeId}`, mode: modeId }));
   }
 
@@ -221,6 +481,11 @@ function ResearchAgent() {
       if (current.length >= 3) return current;
       return current.concat(paperId);
     });
+  }
+
+  function selectTopTwoForComparator() {
+    if (papers.length < 2) return;
+    setSelectedPaperIds(papers.slice(0, 2).map((paper) => paper.paper_id));
   }
 
   async function uploadFiles(event) {
@@ -258,7 +523,7 @@ function ResearchAgent() {
       .map((item) => ({ role: item.role, content: item.content }));
   }
 
-  async function send() {
+  async function send(reviewerAction = "auto") {
     const rawMessage = draft.trim();
     if (loading) return;
     if (activeMode === "reviewer" && !reviewPaperId) {
@@ -269,12 +534,28 @@ function ResearchAgent() {
       setError("Comparator mode needs at least two selected papers.");
       return;
     }
-
-    const message = activeMode === "reviewer" ? buildReviewerPrompt(rawMessage, reviewLens) : rawMessage;
+    const comparatorMessage = comparatorPromptById(comparatorPreset);
+    const reviewerHasHistory = hasReviewerConversation(history);
+    const reviewerHasComplete = hasReviewerCompletedConversation(history);
+    let message = "";
+    let userVisibleMessage = "";
+    if (activeMode === "reviewer") {
+      if (reviewerAction === "restart" || !reviewerHasHistory || reviewerHasComplete) {
+        const lens = reviewLensLabel(reviewLens);
+        message = `[Start Debate] Focus lens: ${lens}`;
+        userVisibleMessage = `[Start Debate] ${lens}`;
+      } else {
+        message = "next";
+        userVisibleMessage = "next";
+      }
+    } else if (activeMode === "comparator") {
+      message = comparatorMessage;
+      userVisibleMessage = `[Compare: ${comparatorLabelById(comparatorPreset)}]`;
+    } else {
+      message = rawMessage;
+      userVisibleMessage = rawMessage;
+    }
     if (!message) return;
-    const userVisibleMessage = activeMode === "reviewer"
-      ? (rawMessage || `[Start Debate] ${reviewLensLabel(reviewLens)}`)
-      : rawMessage;
 
     const historyPayload = compactHistory();
     setDraft("");
@@ -339,7 +620,7 @@ function ResearchAgent() {
             return (
               <div
                 key={paper.paper_id}
-                className="ra-chip"
+                className={`ra-chip${selected ? " selected" : ""}`}
                 style={{ borderColor: selected ? `${modeOf("comparator").hex}66` : undefined, cursor: comparator ? "pointer" : "default" }}
                 onClick={() => comparator && !disabled && toggleComparator(paper.paper_id)}
               >
@@ -404,7 +685,7 @@ function ResearchAgent() {
         <div className="ra-sub">
           {activeMode === "reviewer" ? (
             <>
-              <span>Select paper + lens, then run a live two-reviewer debate.</span>
+              <span>Select paper + lens, then run a claim trial (skeptic vs advocate + evidence-only judge).</span>
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <select className="ra-select" value={reviewPaperId} onChange={(event) => setReviewPaperId(event.target.value)}>
                   <option value="">Choose a paper</option>
@@ -432,8 +713,54 @@ function ResearchAgent() {
             </>
           ) : activeMode === "comparator" ? (
             <>
-              <span>Check up to three papers in the sidebar, then ask for a comparison.</span>
-              <span style={{ color: currentMode.hex }}>{selectedPaperIds.length < 2 ? "Need at least 2 papers" : `${selectedPaperIds.length} papers selected`}</span>
+              <div className="ra-sub-col" style={{ flex: 1 }}>
+                <span>Choose exactly which papers to compare (2-3).</span>
+                <div className="ra-inline-papers">
+                  {papers.map((paper) => {
+                    const selected = selectedPaperIds.includes(paper.paper_id);
+                    const disabled = !selected && selectedPaperIds.length >= 3;
+                    return (
+                      <button
+                        key={`cmp-top-${paper.paper_id}`}
+                        type="button"
+                        className={`ra-inline-paper${selected ? " selected" : ""}`}
+                        disabled={disabled}
+                        onClick={() => toggleComparator(paper.paper_id)}
+                        title={paper.filename}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          readOnly
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                        <span className="ra-inline-paper-name">{paper.filename}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="ra-inline-actions">
+                <button
+                  type="button"
+                  className="ra-inline-btn"
+                  onClick={() => setSelectedPaperIds([])}
+                  disabled={!selectedPaperIds.length}
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  className="ra-inline-btn"
+                  onClick={selectTopTwoForComparator}
+                  disabled={papers.length < 2}
+                >
+                  Pick first 2
+                </button>
+                <span style={{ color: currentMode.hex, fontWeight: 700, minWidth: 120, textAlign: "right" }}>
+                  {selectedPaperIds.length < 2 ? "Need 2+" : `${selectedPaperIds.length} selected`}
+                </span>
+              </div>
             </>
           ) : (
             <>
@@ -455,9 +782,9 @@ function ResearchAgent() {
                     <div className="ra-empty-text">
                       {papers.length
                         ? activeMode === "reviewer"
-                          ? "Select a paper + lens, then run the debate. Optional prompts: 'skeptic: challenge novelty', 'advocate: defend method', 'vector 2', or 'next'."
+                          ? "Select a paper + lens, then use Start Debate and Next Turn to run the structured reviewer panel."
                           : activeMode === "comparator"
-                            ? "Choose two or three papers and compare their methods, benchmarks, results, or novelty."
+                            ? "Choose two or three papers, then run conflict mapping and a verdict matrix."
                             : "Your papers are indexed with semantic chunks. Ask grounded questions, switch modes, and use one workspace for retrieval, writing, and review."
                         : "The backend can now serve the UI, store papers, and route chat through LangGraph. Upload one or more PDFs to start."}
                     </div>
@@ -470,11 +797,16 @@ function ResearchAgent() {
                 }
                 const mode = modeOf(item.mode);
                 const assistant = item.role === "assistant";
+                const bubbleClass = assistant
+                  ? `ra-assistant-bubble${item.mode === "reviewer" ? " reviewer" : ""}`
+                  : "ra-user-bubble";
                 return (
                   <div key={item.id} className={assistant ? "ra-assistant" : "ra-user"}>
                     {assistant ? <div className="ra-tag" style={{ color: mode.hex }}>{mode.glyph} {mode.name}</div> : null}
-                    <div className={assistant ? "ra-assistant-bubble" : "ra-user-bubble"} style={!assistant ? { background: mode.hex } : null}>
-                      {item.content}
+                    <div className={bubbleClass} style={!assistant ? { background: mode.hex } : null}>
+                      {assistant && item.mode === "reviewer" && item.debug ? renderReviewerRoundEvents(item.debug) : null}
+                      {assistant && item.mode === "reviewer" && item.debug && item.debug.final_report ? renderReviewerFinalReportCard(item.debug.final_report) : null}
+                      {assistant ? renderAssistantMarkdown(item.content) : item.content}
                       {assistant && item.citations && item.citations.length ? (
                         <div className="ra-cites">
                           <div className="ra-cites-head">
@@ -508,19 +840,93 @@ function ResearchAgent() {
           </div>
         </section>
 
-        <div className="ra-inputbar">
-          <textarea
-            className="ra-input"
-            rows={1}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder={activeMode === "reviewer" ? "Optional: ask skeptic/advocate, or type 'vector 2' / 'next'..." : activeMode === "comparator" ? "Ask how the selected papers differ in methods, benchmarks, or novelty..." : `Ask ${currentMode.name} something...`}
-          />
-          <button className="ra-send" type="button" disabled={loading || (activeMode === "reviewer" ? !reviewPaperId : !draft.trim())} style={{ background: currentMode.hex, opacity: (loading || (activeMode === "reviewer" ? !reviewPaperId : !draft.trim())) ? .5 : 1, cursor: (loading || (activeMode === "reviewer" ? !reviewPaperId : !draft.trim())) ? "not-allowed" : "pointer" }} onClick={send}>
-            {loading ? "Thinking..." : activeMode === "reviewer" ? "Run Debate" : "Send"}
-          </button>
-        </div>
+        {activeMode === "comparator" ? (
+          <div className="ra-quickbar">
+            {COMPARATOR_QUICK_PROMPTS.map((preset) => (
+              <button
+                key={`cmp-quick-${preset.id}`}
+                type="button"
+                className={`ra-quickbtn${comparatorPreset === preset.id ? " active" : ""}`}
+                onClick={() => setComparatorPreset(preset.id)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {activeMode === "comparator" ? (
+          <div className="ra-inputbar">
+            <div style={{ flex: 1, minHeight: 56, display: "flex", flexDirection: "column", justifyContent: "center", gap: 4, padding: "0 4px" }}>
+              <div style={{ fontSize: 12, color: "#8ea3c8", textTransform: "uppercase", letterSpacing: ".08em" }}>Comparison Focus</div>
+              <div style={{ fontSize: 14, color: "#eaf2ff", fontWeight: 700 }}>{comparatorLabelById(comparatorPreset)}</div>
+            </div>
+            <button className="ra-send" type="button" disabled={loading || selectedPaperIds.length < 2} style={{ background: currentMode.hex, opacity: (loading || selectedPaperIds.length < 2) ? .5 : 1, cursor: (loading || selectedPaperIds.length < 2) ? "not-allowed" : "pointer" }} onClick={() => send()}>
+              {loading ? "Thinking..." : "Compare"}
+            </button>
+          </div>
+        ) : activeMode === "reviewer" ? (
+          <div className="ra-inputbar">
+            <div style={{ flex: 1, minHeight: 56, display: "flex", flexDirection: "column", justifyContent: "center", gap: 4, padding: "0 4px" }}>
+              <div style={{ fontSize: 12, color: "#8ea3c8", textTransform: "uppercase", letterSpacing: ".08em" }}>Reviewer Controls</div>
+              <div style={{ fontSize: 14, color: "#eaf2ff", fontWeight: 700 }}>
+                {reviewerCompleted
+                  ? "Report is complete. Start a new debate if you want another run."
+                  : hasReviewerConversation(history)
+                    ? "Continue structured debate (no free-text input)."
+                    : "Start structured debate from selected lens."}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              {reviewerCompleted ? (
+                <button
+                  className="ra-send"
+                  type="button"
+                  disabled={loading || !reviewPaperId}
+                  style={{ background: currentMode.hex, opacity: (loading || !reviewPaperId) ? .5 : 1, cursor: (loading || !reviewPaperId) ? "not-allowed" : "pointer" }}
+                  onClick={() => send("restart")}
+                >
+                  {loading ? "Thinking..." : "Start New Debate"}
+                </button>
+              ) : (
+                <>
+                  <button
+                    className="ra-send"
+                    type="button"
+                    disabled={loading || !reviewPaperId}
+                    style={{ background: currentMode.hex, opacity: (loading || !reviewPaperId) ? .5 : 1, cursor: (loading || !reviewPaperId) ? "not-allowed" : "pointer" }}
+                    onClick={() => send(hasReviewerConversation(history) ? "next" : "start")}
+                  >
+                    {loading ? "Thinking..." : (hasReviewerConversation(history) ? "Next Turn" : "Start Debate")}
+                  </button>
+                  <button
+                    className="ra-send"
+                    type="button"
+                    disabled={loading || !reviewPaperId}
+                    style={{ background: "#8ea3c8", color: "#0b1322", minWidth: 132, opacity: (loading || !reviewPaperId) ? .5 : 1, cursor: (loading || !reviewPaperId) ? "not-allowed" : "pointer" }}
+                    onClick={() => send("restart")}
+                  >
+                    Restart
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="ra-inputbar">
+            <textarea
+              className="ra-input"
+              rows={1}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder={activeMode === "reviewer" ? "Optional: ask skeptic/advocate, or type 'vector 2' / 'next'..." : `Ask ${currentMode.name} something...`}
+            />
+            <button className="ra-send" type="button" disabled={loading || !draft.trim()} style={{ background: currentMode.hex, opacity: (loading || !draft.trim()) ? .5 : 1, cursor: (loading || !draft.trim()) ? "not-allowed" : "pointer" }} onClick={() => send()}>
+              {loading ? "Thinking..." : "Send"}
+            </button>
+          </div>
+        )}
       </main>
     </div>
   );
