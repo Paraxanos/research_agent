@@ -71,10 +71,11 @@ def _prepare_mode_step(state: GraphState) -> GraphState:
             "Then briefly name what is missing and offer Global mode."
         ),
         Mode.GLOBAL: (
-            "You are an expert, conversational research assistant. "
-            "Respond naturally like a normal high-quality LLM. "
-            "Use uploaded papers when they are relevant to the user request, and cite those paper-grounded claims with [n]. "
-            "If the request is general and not paper-specific, answer freely from your broader knowledge without forcing citations."
+            "You are a high-quality general-purpose assistant. "
+            "Respond naturally, clearly, and directly like a normal LLM. "
+            "Use uploaded papers only when they are genuinely relevant to the user request. "
+            "Do not force paper grounding for general questions. "
+            "Use inline citations [n] only for claims that come from retrieved paper context."
         ),
         Mode.WRITER: (
             "You are a research writing assistant that has studied this researcher's style. "
@@ -138,6 +139,9 @@ def _retrieve_step(state: GraphState) -> GraphState:
         paper_ids = paper_ids[:3]
         query = f"{state['message']} contributions methods benchmarks results differences"
         hits = _retrieve_comparator_hits(query=query, paper_ids=paper_ids)
+    elif mode == Mode.GLOBAL and not _should_use_global_retrieval(query=query, paper_ids=paper_ids):
+        hits = []
+        debug["global_retrieval"] = "skipped_for_general_query"
     else:
         hits, retrieval_subqueries = _retrieve_general_hits(
             query=query,
@@ -347,7 +351,7 @@ def _contextualize_query(*, message: str, history: list[dict[str, Any]], mode: M
     current = (message or "").strip()
     if not current:
         return ""
-    if mode == Mode.REVIEWER:
+    if mode in {Mode.REVIEWER, Mode.COMPARATOR}:
         return current
     if not _is_followup_style_query(current):
         return current
@@ -626,6 +630,7 @@ def _draft_answer_step(state: GraphState) -> GraphState:
                 "draft_answer": _prefix_retrieval_fallback(
                     fallback_text,
                     retry_hint=retry_hint,
+                    mode=mode,
                 ),
                 "citations": state.get("citations", []),
                 "debug": debug,
@@ -643,7 +648,8 @@ def _draft_answer_step(state: GraphState) -> GraphState:
             "debug": {**debug, "response_stage": "validation"},
         }
 
-    if mode == Mode.COMPARATOR and len(documents) < 2:
+    comparator_doc_papers = _unique_paper_ids(documents)
+    if mode == Mode.COMPARATOR and (len(documents) < 2 or len(comparator_doc_papers) < 2):
         return {
             "draft_answer": (
                 "I could not retrieve enough evidence from the selected papers. "
@@ -709,6 +715,7 @@ def _draft_answer_step(state: GraphState) -> GraphState:
                 message=state["message"],
                 history=state.get("history", []),
                 documents=prompt_documents,
+                paper_ids=paper_ids,
             ),
             temperature=_temperature_for_mode(mode),
             max_output_tokens=max_output_tokens,
@@ -719,6 +726,7 @@ def _draft_answer_step(state: GraphState) -> GraphState:
         draft_answer = _prefix_retrieval_fallback(
             _rate_limit_fallback_answer(state, retry_hint=retry_hint),
             retry_hint=retry_hint,
+            mode=mode,
         )
         debug["response_stage"] = "model_fallback"
         debug["model_fallback"] = True
@@ -727,6 +735,8 @@ def _draft_answer_step(state: GraphState) -> GraphState:
         debug["model_error"] = str(error)[:180]
     if not debug.get("model_fallback"):
         debug["response_stage"] = "draft_model"
+    if mode == Mode.COMPARATOR:
+        debug["comparator_retrieved_paper_count"] = len(comparator_doc_papers)
     debug["used_context_docs"] = len(prompt_documents)
     return {
         "draft_answer": draft_answer,
@@ -764,11 +774,16 @@ def _validate_answer_step(state: GraphState) -> GraphState:
             "debug": {**debug, "validation_stage": "reviewer_debate_bypassed"},
         }
 
-    if mode == Mode.GLOBAL and debug.get("global_context_relevance") == "low":
+    if mode == Mode.GLOBAL:
+        stage = (
+            "global_low_context_bypassed"
+            if debug.get("global_context_relevance") == "low"
+            else "global_normal_llm_bypassed"
+        )
         return {
             "validated_answer": draft,
             "validation_issues": [],
-            "debug": {**debug, "validation_stage": "global_low_context_bypassed"},
+            "debug": {**debug, "validation_stage": stage},
         }
 
     if not text_service.available or not documents:
@@ -834,6 +849,16 @@ def _finalize_answer_step(state: GraphState) -> GraphState:
     if mode == Mode.GLOBAL and debug.get("global_context_relevance") == "low":
         answer = _strip_inline_reference_markers(answer)
         debug["global_citation_cleanup"] = "applied"
+    if mode == Mode.COMPARATOR and documents:
+        quality_issues = _comparator_answer_quality_issues(
+            answer=answer,
+            citations=raw_citations,
+            documents=documents,
+            selected_paper_ids=state.get("paper_ids", []),
+        )
+        if quality_issues:
+            answer = _comparator_structured_fallback(documents=documents)
+            debug["comparator_quality_guard"] = quality_issues
 
     if mode in {Mode.LOCAL, Mode.REVIEWER, Mode.COMPARATOR} and documents and not _has_inline_citations(answer):
         debug["citation_warning"] = "Answer lacked inline citations after validation."
@@ -959,8 +984,13 @@ def _fallback_without_model(state: GraphState) -> str:
     )
 
 
-def _prefix_retrieval_fallback(answer: str, *, retry_hint: str) -> str:
+def _prefix_retrieval_fallback(answer: str, *, retry_hint: str, mode: Mode) -> str:
     guidance = f" Try again in about {retry_hint}." if retry_hint else " Try again shortly."
+    if mode == Mode.GLOBAL:
+        return (
+            "Model generation is temporarily unavailable."
+            f"{guidance}\n\n{answer.strip()}"
+        ).strip()
     return (
         "Model generation is temporarily unavailable, so this is a retrieval-only fallback."
         f"{guidance}\n\n{answer.strip()}"
@@ -978,14 +1008,14 @@ def _rate_limit_fallback_answer(state: GraphState, *, retry_hint: str) -> str:
             documents=documents,
         )
     if mode == Mode.GLOBAL:
-        if documents:
+        if documents and _is_context_relevant_to_query(state.get("message", ""), documents):
             return _local_extractive_fallback(
                 query=state.get("message", ""),
                 documents=documents,
             )
         return (
-            "I could not find enough grounded evidence in the uploaded papers for this request. "
-            "Try a paper-specific question or upload a relevant source."
+            "I’m temporarily unable to reach the text-generation provider for Global mode. "
+            "Please retry in a moment."
         )
     if mode == Mode.COMPARATOR:
         if not documents:
@@ -1083,6 +1113,110 @@ def _comparator_structured_fallback(*, documents: list[Document]) -> str:
         + "\n\n## Decision By Use Case\n"
         + "\n".join(use_case_lines)
     )
+
+
+def _unique_paper_ids(documents: list[Document]) -> set[str]:
+    paper_ids: set[str] = set()
+    for document in documents:
+        paper_id = str((document.metadata or {}).get("paper_id", "")).strip()
+        if paper_id:
+            paper_ids.add(paper_id)
+    return paper_ids
+
+
+def _comparator_selected_filenames(
+    *,
+    documents: list[Document],
+    selected_paper_ids: list[str] | None,
+) -> list[str]:
+    lookup = _comparator_filename_lookup(documents)
+    selected: list[str] = []
+    seen: set[str] = set()
+    for paper_id in selected_paper_ids or []:
+        pid = str(paper_id or "").strip()
+        if not pid:
+            continue
+        name = lookup.get(pid, "")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        selected.append(name)
+    if selected:
+        return selected
+    for document in documents:
+        filename = str((document.metadata or {}).get("filename", "")).strip()
+        if not filename or filename in seen:
+            continue
+        seen.add(filename)
+        selected.append(filename)
+        if len(selected) >= 3:
+            break
+    return selected
+
+
+def _comparator_answer_quality_issues(
+    *,
+    answer: str,
+    citations: list[dict[str, Any]],
+    documents: list[Document],
+    selected_paper_ids: list[str] | None,
+) -> list[str]:
+    issues: list[str] = []
+    text = (answer or "").strip()
+    if not text:
+        return ["empty_answer"]
+
+    expected_sections = (
+        "## Papers Compared",
+        "## Claim Matrix",
+        "## Conflict Map",
+        "## Benchmark Verdict Matrix",
+        "## Method Trade-offs",
+        "## Synthesis Blueprint",
+        "## Decision By Use Case",
+    )
+    missing_sections = [section for section in expected_sections if section.lower() not in text.lower()]
+    if len(missing_sections) >= 3:
+        issues.append("missing_sections")
+    if len(text) < 460:
+        issues.append("too_short")
+
+    selected_filenames = _comparator_selected_filenames(
+        documents=documents,
+        selected_paper_ids=selected_paper_ids,
+    )
+    missing_filename_mentions = [
+        filename
+        for filename in selected_filenames
+        if filename.lower() not in text.lower()
+    ]
+    if missing_filename_mentions:
+        issues.append("missing_selected_paper_mentions")
+
+    referenced_numbers = sorted({int(match) for match in re.findall(r"\[([0-9]+)\]", text) if match.isdigit()})
+    if not referenced_numbers:
+        issues.append("missing_inline_citations")
+        return issues
+
+    cited_sources: set[str] = set()
+    for number in referenced_numbers:
+        index = number - 1
+        if index < 0 or index >= len(citations):
+            continue
+        citation = citations[index]
+        source = str(citation.get("paper_id", "")).strip() or str(citation.get("filename", "")).strip()
+        if source:
+            cited_sources.add(source)
+
+    if len(_unique_paper_ids(documents)) >= 2 and len(cited_sources) < 2:
+        issues.append("citations_single_paper")
+
+    mentioned_files = {match.strip() for match in re.findall(r"\b([A-Za-z0-9_.-]+\.pdf)\b", text)}
+    allowed_files = {name.strip() for name in selected_filenames if name.strip()}
+    unexpected = [name for name in mentioned_files if name not in allowed_files]
+    if allowed_files and unexpected:
+        issues.append("mentions_unselected_paper")
+    return issues
 
 
 def _extract_signal_sentence(text: str) -> str:
@@ -1497,6 +1631,7 @@ def _draft_user_prompt(
     message: str,
     history: list[dict[str, str]],
     documents: list[Document],
+    paper_ids: list[str] | None = None,
 ) -> str:
     history_text = _format_history(history)
     reviewer_context_text = _format_context(documents, max_docs=max(settings.rerank_top_n, 8))
@@ -1545,9 +1680,8 @@ def _draft_user_prompt(
         person_query = _is_global_person_query(message)
         if recommendation_query:
             query_directive = (
-                "- The user is asking for related-paper recommendations. "
-                "Provide 8-12 concrete papers (title + year + one-line relevance). "
-                "Use broader model knowledge and do not invent [n] citations.\n"
+                "- The user is asking for recommendations. "
+                "Give a useful list with concise relevance reasoning for each item.\n"
             )
         elif person_query:
             query_directive = (
@@ -1558,17 +1692,14 @@ def _draft_user_prompt(
         else:
             query_directive = ""
         return (
-            "You are producing a response in Global mode.\n"
-            "Requirements:\n"
-            "- Answer naturally and directly.\n"
-            "- You are not limited to retrieved paper context; use broader model knowledge when helpful.\n"
-            "- Treat retrieved context as optional support, not a hard boundary.\n"
-            "- If a claim is grounded in retrieved paper context, cite it with [n].\n"
-            "- Never invent [n] citations for general-knowledge or conversational parts.\n"
-            "- For general questions (for example definitions or everyday knowledge), answer directly and confidently.\n"
-            "- Do not claim you are missing uploaded papers when a general answer is possible.\n"
-            "- Keep paper citations minimal in Global mode (typically 1-2 strongest references).\n"
-            "- If prior turns were paper-constrained, do not carry that constraint into this global response.\n"
+            "You are responding in Global mode.\n"
+            "Guidelines:\n"
+            "- Answer like a normal high-quality LLM: clear, practical, and direct.\n"
+            "- Use general knowledge by default.\n"
+            "- Use retrieved paper context only when it clearly helps this question.\n"
+            "- If a specific statement comes from retrieved paper context, cite it with [n].\n"
+            "- Do not force citations or paper framing for general questions.\n"
+            "- Do not mention missing uploaded papers unless the user explicitly asks for paper-grounded evidence.\n"
             f"{query_directive}\n"
             "Conversation history:\n"
             f"{history_text}\n\n"
@@ -1579,7 +1710,15 @@ def _draft_user_prompt(
         )
 
     if mode == Mode.COMPARATOR:
-        paper_list = _comparator_paper_list(documents)
+        paper_list = _comparator_paper_list(
+            documents=documents,
+            selected_paper_ids=paper_ids,
+        )
+        evidence_pack = _comparator_evidence_pack(
+            documents=documents,
+            selected_paper_ids=paper_ids,
+            max_snippets_per_paper=3,
+        )
         return (
             "You are producing a deep, decision-useful comparison of selected papers.\n"
             "Requirements:\n"
@@ -1589,6 +1728,9 @@ def _draft_user_prompt(
             "- If no shared benchmark appears, state that clearly instead of guessing.\n"
             "- Be specific: include exact metrics/datasets/method names when available.\n"
             "- If evidence for a requested comparison axis is weak, abstain explicitly.\n"
+            "- Do not return short summaries. Provide depth under every section.\n"
+            "- Never attach a claim to Paper A using a citation that comes from Paper B.\n"
+            "- If evidence for one selected paper is thin, say so directly for that paper.\n"
             "- Output in markdown with EXACT sections:\n"
             "  1) ## Papers Compared\n"
             "  2) ## Claim Matrix\n"
@@ -1597,7 +1739,7 @@ def _draft_user_prompt(
             "  5) ## Method Trade-offs\n"
             "  6) ## Synthesis Blueprint\n"
             "  7) ## Decision By Use Case\n"
-            "- In `## Claim Matrix`, give 2 strongest claims per paper with direct evidence.\n"
+            "- In `## Claim Matrix`, give at least 2 strongest claims per paper with direct evidence.\n"
             "- In `## Conflict Map`, separate `Agreements`, `Contradictions`, and `Non-overlap`.\n"
             "- In `## Benchmark Verdict Matrix`, score each paper (1-10) on novelty, empirical rigor, and reproducibility with one-line justification.\n"
             "- In `## Synthesis Blueprint`, specify what to borrow from each paper and one concrete merged experiment.\n"
@@ -1605,8 +1747,11 @@ def _draft_user_prompt(
             "- If user message is short (for example 'compare'), still deliver full depth.\n\n"
             "Selected papers:\n"
             f"{paper_list}\n\n"
-            "Conversation history:\n"
-            f"{history_text}\n\n"
+            "Evidence Pack (citation map):\n"
+            f"{evidence_pack}\n\n"
+            "Conversation policy:\n"
+            "- Ignore prior-turn claims about any paper not listed in `Selected papers`.\n"
+            "- Resolve this response from the current evidence pack only.\n\n"
             "User message:\n"
             f"{message}\n\n"
             "Retrieved context:\n"
@@ -1628,9 +1773,23 @@ def _draft_user_prompt(
     )
 
 
-def _comparator_paper_list(documents: list[Document]) -> str:
-    seen: set[str] = set()
+def _comparator_paper_list(
+    *,
+    documents: list[Document],
+    selected_paper_ids: list[str] | None = None,
+) -> str:
+    id_to_filename = _comparator_filename_lookup(documents)
     labels: list[str] = []
+    seen: set[str] = set()
+    for paper_id in selected_paper_ids or []:
+        pid = str(paper_id or "").strip()
+        if not pid:
+            continue
+        label = id_to_filename.get(pid, f"paper_id:{pid}")
+        if label in seen:
+            continue
+        seen.add(label)
+        labels.append(label)
     for document in documents:
         filename = str((document.metadata or {}).get("filename", "")).strip()
         if not filename or filename in seen:
@@ -1642,6 +1801,74 @@ def _comparator_paper_list(documents: list[Document]) -> str:
     if not labels:
         return "- Unknown papers from retrieved context"
     return "\n".join(f"- {label}" for label in labels)
+
+
+def _comparator_filename_lookup(documents: list[Document]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for document in documents:
+        metadata = document.metadata or {}
+        paper_id = str(metadata.get("paper_id", "")).strip()
+        filename = str(metadata.get("filename", "")).strip()
+        if paper_id and filename and paper_id not in mapping:
+            mapping[paper_id] = filename
+    return mapping
+
+
+def _comparator_evidence_pack(
+    *,
+    documents: list[Document],
+    selected_paper_ids: list[str] | None,
+    max_snippets_per_paper: int,
+) -> str:
+    by_paper: dict[str, list[str]] = {}
+    id_to_filename = _comparator_filename_lookup(documents)
+    selected = [str(paper_id or "").strip() for paper_id in (selected_paper_ids or []) if str(paper_id or "").strip()]
+    selected_set = set(selected)
+    for index, document in enumerate(documents, start=1):
+        metadata = document.metadata or {}
+        paper_id = str(metadata.get("paper_id", "")).strip() or "unknown"
+        if selected_set and paper_id not in selected_set:
+            continue
+        if len(by_paper.get(paper_id, [])) >= max(1, max_snippets_per_paper):
+            continue
+        raw_text = (document.page_content or "").strip()
+        if _looks_like_reference_snippet(raw_text) or _looks_like_non_argument_snippet(raw_text):
+            continue
+        snippet = _extract_signal_sentence(raw_text)
+        if not snippet:
+            continue
+        filename = str(metadata.get("filename", "unknown.pdf")).strip() or "unknown.pdf"
+        page = metadata.get("page")
+        page_suffix = f", p.{page}" if page else ""
+        by_paper.setdefault(paper_id, []).append(f"- [{index}] {filename}{page_suffix}: \"{snippet}\"")
+
+    ordered_ids: list[str] = []
+    seen: set[str] = set()
+    for paper_id in selected:
+        if paper_id in seen:
+            continue
+        seen.add(paper_id)
+        ordered_ids.append(paper_id)
+    for document in documents:
+        paper_id = str((document.metadata or {}).get("paper_id", "")).strip() or "unknown"
+        if paper_id in seen:
+            continue
+        seen.add(paper_id)
+        ordered_ids.append(paper_id)
+
+    lines: list[str] = []
+    for paper_id in ordered_ids[:3]:
+        filename = id_to_filename.get(paper_id, f"paper_id:{paper_id}")
+        lines.append(f"### {filename}")
+        entries = by_paper.get(paper_id, [])
+        if entries:
+            lines.extend(entries)
+        else:
+            lines.append("- No high-signal snippet retrieved for this paper in current context.")
+
+    if not lines:
+        return "No comparator evidence pack available."
+    return "\n".join(lines)
 
 
 def _run_reviewer_debate(state: GraphState) -> GraphState:
@@ -4473,6 +4700,25 @@ def _active_vector_claim(state: GraphState) -> str:
     return ""
 
 
+def _should_use_global_retrieval(*, query: str, paper_ids: list[str]) -> bool:
+    if paper_ids:
+        return True
+    lower = (query or "").lower()
+    if ".pdf" in lower:
+        return True
+    if _looks_paper_specific_query(query):
+        return True
+    explicit_markers = (
+        "uploaded paper",
+        "uploaded papers",
+        "in your papers",
+        "in this paper",
+        "according to the paper",
+        "from the paper",
+    )
+    return any(marker in lower for marker in explicit_markers)
+
+
 def _is_context_relevant_to_query(query: str, documents: list[Document]) -> bool:
     if not documents:
         return False
@@ -4814,6 +5060,15 @@ def _select_balanced_docs(
     if mode != Mode.COMPARATOR:
         return [document for document, _ in scored_docs[:limit]]
 
+    filtered_scored_docs = [
+        (document, score)
+        for document, score in scored_docs
+        if not _looks_like_reference_snippet(document.page_content or "")
+        and not _looks_like_non_argument_snippet(document.page_content or "")
+    ]
+    if filtered_scored_docs:
+        scored_docs = filtered_scored_docs
+
     by_paper: dict[str, list[tuple[Document, float]]] = {}
     for document, score in scored_docs:
         paper_id = str((document.metadata or {}).get("paper_id", ""))
@@ -4972,7 +5227,7 @@ def _select_citations_for_answer(
     elif mode == Mode.LOCAL:
         fallback_limit = 1
     elif mode == Mode.COMPARATOR:
-        fallback_limit = 2
+        fallback_limit = min(4, len(citations))
     else:
         fallback_limit = 0
     return citations[: min(fallback_limit, len(citations))]
@@ -5025,7 +5280,7 @@ def _reindex_answer_citations(
 def _temperature_for_mode(mode: Mode) -> float:
     return {
         Mode.LOCAL: 0.0,
-        Mode.GLOBAL: 0.2,
+        Mode.GLOBAL: 0.35,
         Mode.WRITER: 0.4,
         Mode.REVIEWER: 0.1,
         Mode.COMPARATOR: 0.1,

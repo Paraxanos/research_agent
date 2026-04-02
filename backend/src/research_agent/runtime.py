@@ -108,6 +108,10 @@ class ResearchAgentRuntime:
         )
 
     def chat(self, request: ChatRequest) -> ChatResponse:
+        history_payload = [item.model_dump() for item in request.history]
+        if request.mode == Mode.COMPARATOR:
+            # Comparator runs stateless per turn to avoid cross-paper drift from prior turns.
+            history_payload = []
         payload = {
             "session_id": request.session_id,
             "mode": request.mode,
@@ -115,7 +119,7 @@ class ResearchAgentRuntime:
             "paper_ids": request.paper_ids,
             "review_paper_id": request.review_paper_id,
             "intervention_mode": request.intervention_mode,
-            "history": [item.model_dump() for item in request.history],
+            "history": history_payload,
             "debug": {},
         }
         if request.mode == Mode.REVIEWER and request.review_paper_id:
@@ -162,6 +166,9 @@ class ResearchAgentRuntime:
         paper_scope = request.paper_ids
         if request.mode == Mode.REVIEWER and request.review_paper_id:
             paper_scope = [request.review_paper_id]
+        if request.mode == Mode.GLOBAL and not request.paper_ids:
+            # For Global mode fallback, avoid forcing retrieval from all indexed papers.
+            paper_scope = ["__global_fallback_no_paper_scope__"]
         hits = self._retriever.search(
             query=request.message,
             paper_ids=paper_scope,
@@ -178,7 +185,13 @@ class ResearchAgentRuntime:
             for hit in hits[:2]
         ]
 
-        if hits:
+        if request.mode == Mode.GLOBAL and not self._looks_paper_grounded_request(request.message):
+            answer = (
+                "Model generation is temporarily unavailable in Global mode. "
+                "Please retry in a moment."
+            )
+            citations = []
+        elif hits:
             top = self._compact_snippet(hits[0].snippet)
             if request.mode == Mode.REVIEWER:
                 answer = (
@@ -232,6 +245,24 @@ class ResearchAgentRuntime:
         if len(cleaned) <= max_chars:
             return cleaned
         return f"{cleaned[: max_chars - 3].rstrip()}..."
+
+    @staticmethod
+    def _looks_paper_grounded_request(message: str) -> bool:
+        lower = (message or "").lower()
+        markers = (
+            "paper",
+            "uploaded",
+            ".pdf",
+            "according to",
+            "in the paper",
+            "authors",
+            "dataset",
+            "benchmark",
+            "section",
+            "table",
+            "figure",
+        )
+        return any(marker in lower for marker in markers)
 
     def _configure_langsmith(self) -> None:
         if not self._settings.langsmith_tracing:

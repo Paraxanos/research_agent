@@ -63,6 +63,29 @@ const CSS = `
   .ra-assistant-bubble.reviewer .ra-md-h3 { color: #ffe7ce; }
   .ra-assistant-bubble.reviewer .ra-md-p { color: #fde8d4; }
   .ra-assistant-bubble.reviewer .ra-md-ul li { color: #f7dcc0; }
+  .ra-assistant-bubble.comparator { background: linear-gradient(155deg, rgba(37,18,34,.95), rgba(24,24,44,.96)); border: 1px solid rgba(244,114,182,.34); box-shadow: inset 0 0 0 1px rgba(244,114,182,.09); }
+  .ra-assistant-bubble.comparator .ra-md-h2 { color: #ffd7ef; }
+  .ra-assistant-bubble.comparator .ra-md-h3 { color: #ffe6f6; }
+  .ra-assistant-bubble.comparator .ra-md-p { color: #ffe8f8; }
+  .ra-assistant-bubble.comparator .ra-md-ul li { color: #f9dbef; }
+  .ra-assistant.comparator-message { max-width: 94%; }
+  .ra-comp-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .ra-comp-pill { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #ffd2eb; border: 1px solid rgba(244,114,182,.44); background: rgba(244,114,182,.18); border-radius: 999px; padding: 4px 10px; font-weight: 700; }
+  .ra-comp-copy { border: 1px solid rgba(236,143,198,.45); background: rgba(244,114,182,.15); color: #ffe6f7; border-radius: 10px; font-size: 11px; padding: 5px 10px; cursor: pointer; font-weight: 700; }
+  .ra-comp-copy:hover { background: rgba(244,114,182,.26); }
+  .ra-comp-shell { display: flex; flex-direction: column; gap: 10px; }
+  .ra-comp-preface { padding: 12px 12px 4px 12px; border-radius: 12px; border: 1px solid rgba(236,143,198,.24); background: rgba(33,19,34,.64); }
+  .ra-comp-outline { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ra-comp-outline-chip { padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(244,114,182,.34); background: rgba(244,114,182,.14); color: #ffd9f0; font-size: 11px; }
+  .ra-comp-sections { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .ra-comp-section { border-radius: 14px; border: 1px solid rgba(236,143,198,.26); background: linear-gradient(160deg, rgba(35,16,34,.68), rgba(19,17,34,.72)); padding: 12px; box-shadow: 0 12px 24px rgba(0,0,0,.18); }
+  .ra-comp-section-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .ra-comp-section-index { min-width: 32px; height: 24px; border-radius: 8px; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #ffd7ef; background: rgba(244,114,182,.2); border: 1px solid rgba(244,114,182,.42); }
+  .ra-comp-section-title { margin: 0; font-size: 15px; color: #ffe6f7; font-weight: 700; letter-spacing: .01em; }
+  .ra-assistant-bubble.comparator .ra-md-h2 { margin: 0 0 8px 0; }
+  .ra-assistant-bubble.comparator .ra-md-table-wrap { border-color: rgba(236,143,198,.34); background: rgba(31,15,32,.65); }
+  .ra-assistant-bubble.comparator .ra-md-table th { background: rgba(76,31,65,.68); color: #ffe4f5; }
+  .ra-assistant-bubble.comparator .ra-md-table td { color: #ffe7f8; }
   .ra-review-live { margin-bottom: 12px; border-radius: 14px; border: 1px solid rgba(251,146,60,.3); background: rgba(39,26,14,.55); padding: 10px; }
   .ra-review-live-head { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: #ffd7ac; margin-bottom: 8px; }
   .ra-review-live-list { display: grid; gap: 8px; }
@@ -97,6 +120,12 @@ const CSS = `
   .ra-md-p { margin: 0 0 10px 0; color: #dce8ff; line-height: 1.6; }
   .ra-md-ul, .ra-md-ol { margin: 0 0 10px 20px; padding: 0; color: #dce8ff; }
   .ra-md-ul li, .ra-md-ol li { margin: 0 0 6px 0; line-height: 1.55; }
+  .ra-md-table-wrap { margin: 0 0 12px 0; overflow-x: auto; border: 1px solid rgba(149,170,210,.2); border-radius: 12px; }
+  .ra-md-table { width: 100%; min-width: 560px; border-collapse: collapse; background: rgba(10,16,30,.86); }
+  .ra-md-table th, .ra-md-table td { border-bottom: 1px solid rgba(149,170,210,.16); padding: 9px 10px; text-align: left; vertical-align: top; font-size: 12px; line-height: 1.5; }
+  .ra-md-table th { background: rgba(30,40,66,.9); color: #eef5ff; font-weight: 700; }
+  .ra-md-table td { color: #d6e4ff; }
+  .ra-md-table tr:last-child td { border-bottom: none; }
   .ra-md-strong { color: #ffffff; font-weight: 700; }
   .ra-md-code { padding: 1px 6px; border-radius: 6px; background: rgba(96,165,250,.2); border: 1px solid rgba(96,165,250,.38); color: #cfe3ff; font-family: "IBM Plex Mono","Consolas",monospace; font-size: 12px; }
   .ra-cites { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(145,164,203,.14); }
@@ -104,12 +133,18 @@ const CSS = `
   .ra-cites-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #9cb3da; font-weight: 700; }
   .ra-cites-count { min-width: 22px; height: 22px; padding: 0 8px; border-radius: 999px; background: rgba(96,165,250,.14); border: 1px solid rgba(96,165,250,.34); color: #b9d4ff; font-size: 11px; display: grid; place-items: center; font-weight: 700; }
   .ra-cite { padding: 12px 14px; border-radius: 12px; background: rgba(10,16,30,.88); border: 1px solid rgba(145,164,203,.16); }
-  .ra-cite-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+  .ra-cite-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; }
+  .ra-cite-summary::-webkit-details-marker { display: none; }
   .ra-cite-label { font-size: 12px; font-weight: 700; color: #e3eeff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ra-cite-badge { padding: 2px 7px; border-radius: 999px; background: rgba(96,165,250,.15); border: 1px solid rgba(96,165,250,.35); font-size: 10px; letter-spacing: .06em; color: #9ec6ff; font-weight: 700; }
-  .ra-cite-meta { font-size: 11px; color: #95a9ce; }
+  .ra-cite-meta { font-size: 11px; color: #95a9ce; white-space: nowrap; }
   .ra-cite-text { font-size: 12px; line-height: 1.55; color: #a9bddf; }
-  .ra-cite-block { display: flex; flex-direction: column; gap: 6px; }
+  .ra-cite-block { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .ra-comp-cites-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .ra-cite-group { border: 1px solid rgba(236,143,198,.24); border-radius: 12px; background: rgba(31,15,32,.52); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .ra-cite-group-head { font-size: 12px; font-weight: 700; color: #ffe4f4; border-bottom: 1px solid rgba(236,143,198,.2); padding-bottom: 6px; margin-bottom: 2px; }
+  .ra-cite.comp { background: rgba(17,12,25,.72); border-color: rgba(236,143,198,.2); }
+  @media (max-width: 860px) { .ra-comp-cites-grid { grid-template-columns: 1fr; } }
   .ra-error { padding: 12px 14px; border-radius: 14px; background: rgba(61,20,28,.9); border: 1px solid rgba(251,146,60,.35); color: #ffd0ad; font-size: 13px; }
   .ra-dots { display: flex; gap: 8px; padding-left: 24px; }
   .ra-pulse { width: 8px; height: 8px; border-radius: 999px; animation: raPulse 1.2s infinite ease-in-out; }
@@ -216,6 +251,7 @@ function renderAssistantMarkdown(content) {
   const blocks = [];
   let listType = null;
   let listItems = [];
+  let tableRows = [];
   let key = 0;
 
   const flushList = () => {
@@ -230,12 +266,70 @@ function renderAssistantMarkdown(content) {
     listItems = [];
   };
 
+  const parseTableCells = (row) =>
+    String(row || "")
+      .trim()
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((cell) => cell.trim());
+
+  const isSeparatorRow = (cells) =>
+    cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+
+  const flushTable = () => {
+    if (!tableRows.length) return;
+    const parsedRows = tableRows.map(parseTableCells).filter((cells) => cells.length > 0);
+    tableRows = [];
+    if (!parsedRows.length) return;
+    const rows = parsedRows.filter((cells) => !isSeparatorRow(cells));
+    if (!rows.length) return;
+
+    const header = rows[0];
+    const bodyRows = rows.slice(1);
+    blocks.push(
+      <div key={`tbl-wrap-${key++}`} className="ra-md-table-wrap">
+        <table className="ra-md-table">
+          <thead>
+            <tr>
+              {header.map((cell, index) => (
+                <th key={`th-${index}`}>{renderInlineSegments(cell, `th-${index}`)}</th>
+              ))}
+            </tr>
+          </thead>
+          {bodyRows.length ? (
+            <tbody>
+              {bodyRows.map((row, rowIndex) => (
+                <tr key={`tr-${rowIndex}`}>
+                  {header.map((_, columnIndex) => (
+                    <td key={`td-${rowIndex}-${columnIndex}`}>
+                      {renderInlineSegments(row[columnIndex] || "", `td-${rowIndex}-${columnIndex}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          ) : null}
+        </table>
+      </div>,
+    );
+  };
+
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) {
       flushList();
+      flushTable();
       continue;
     }
+
+    if (/^\|.*\|$/.test(trimmed)) {
+      flushList();
+      tableRows.push(trimmed);
+      continue;
+    }
+
+    flushTable();
 
     const orderedMatch = trimmed.match(/^(\d+)\.\s+(.+)/);
     if (orderedMatch) {
@@ -271,7 +365,88 @@ function renderAssistantMarkdown(content) {
   }
 
   flushList();
+  flushTable();
   return <div className="ra-md">{blocks.length ? blocks : <p className="ra-md-p">{content}</p>}</div>;
+}
+
+function splitComparatorSections(content) {
+  const lines = String(content || "").split("\n");
+  const sections = [];
+  const introLines = [];
+  let currentTitle = "";
+  let currentLines = [];
+
+  const flushSection = () => {
+    if (!currentTitle) return;
+    sections.push({
+      title: currentTitle,
+      body: currentLines.join("\n").trim(),
+    });
+    currentTitle = "";
+    currentLines = [];
+  };
+
+  for (const line of lines) {
+    const headingMatch = line.trim().match(/^##\s+(.+)$/);
+    if (headingMatch) {
+      flushSection();
+      currentTitle = headingMatch[1].trim();
+      continue;
+    }
+    if (currentTitle) {
+      currentLines.push(line);
+    } else {
+      introLines.push(line);
+    }
+  }
+  flushSection();
+  return {
+    intro: introLines.join("\n").trim(),
+    sections,
+  };
+}
+
+function renderComparatorAnswer(content) {
+  const { intro, sections } = splitComparatorSections(content);
+  if (!sections.length) {
+    return renderAssistantMarkdown(content);
+  }
+
+  return (
+    <div className="ra-comp-shell">
+      {intro ? <div className="ra-comp-preface">{renderAssistantMarkdown(intro)}</div> : null}
+      <div className="ra-comp-outline">
+        {sections.map((section, index) => (
+          <span key={`outline-${index}`} className="ra-comp-outline-chip">
+            {index + 1}. {section.title}
+          </span>
+        ))}
+      </div>
+      <div className="ra-comp-sections">
+        {sections.map((section, index) => (
+          <section key={`sec-${index}`} className="ra-comp-section">
+            <div className="ra-comp-section-head">
+              <span className="ra-comp-section-index">{String(index + 1).padStart(2, "0")}</span>
+              <h3 className="ra-comp-section-title">{section.title}</h3>
+            </div>
+            {renderAssistantMarkdown(section.body || "No detail provided.")}
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function groupCitationsByFilename(citations) {
+  const grouped = new Map();
+  (citations || []).forEach((citation, index) => {
+    const filename = String(citation?.filename || "Unknown source");
+    if (!grouped.has(filename)) {
+      grouped.set(filename, []);
+    }
+    grouped.get(filename).push({ citation, index });
+  });
+  return Array.from(grouped.entries()).map(([filename, entries]) => ({ filename, entries }));
 }
 
 function renderReviewerFinalReportCard(report) {
@@ -407,6 +582,7 @@ function ResearchAgent() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [copiedComparatorId, setCopiedComparatorId] = useState("");
   const fileRef = useRef(null);
   const scrollRef = useRef(null);
   const didInitialResetRef = useRef(false);
@@ -557,7 +733,7 @@ function ResearchAgent() {
     }
     if (!message) return;
 
-    const historyPayload = compactHistory();
+    const historyPayload = activeMode === "comparator" ? [] : compactHistory();
     setDraft("");
     setError("");
     setLoading(true);
@@ -596,6 +772,30 @@ function ResearchAgent() {
       event.preventDefault();
       send();
     }
+  }
+
+  async function copyComparatorAnswer(messageId, content) {
+    const text = String(content || "").trim();
+    if (!text) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const probe = document.createElement("textarea");
+        probe.value = text;
+        probe.setAttribute("readonly", "true");
+        probe.style.position = "absolute";
+        probe.style.left = "-9999px";
+        document.body.appendChild(probe);
+        probe.select();
+        document.execCommand("copy");
+        document.body.removeChild(probe);
+      }
+      setCopiedComparatorId(messageId);
+      setTimeout(() => {
+        setCopiedComparatorId((current) => (current === messageId ? "" : current));
+      }, 1400);
+    } catch (err) {}
   }
 
   return (
@@ -798,35 +998,64 @@ function ResearchAgent() {
                 const mode = modeOf(item.mode);
                 const assistant = item.role === "assistant";
                 const bubbleClass = assistant
-                  ? `ra-assistant-bubble${item.mode === "reviewer" ? " reviewer" : ""}`
+                  ? `ra-assistant-bubble${item.mode === "reviewer" ? " reviewer" : ""}${item.mode === "comparator" ? " comparator" : ""}`
                   : "ra-user-bubble";
+                const comparatorCiteGroups = assistant && item.mode === "comparator"
+                  ? groupCitationsByFilename(item.citations || [])
+                  : [];
                 return (
-                  <div key={item.id} className={assistant ? "ra-assistant" : "ra-user"}>
+                  <div key={item.id} className={assistant ? `ra-assistant${item.mode === "comparator" ? " comparator-message" : ""}` : "ra-user"}>
                     {assistant ? <div className="ra-tag" style={{ color: mode.hex }}>{mode.glyph} {mode.name}</div> : null}
                     <div className={bubbleClass} style={!assistant ? { background: mode.hex } : null}>
+                      {assistant && item.mode === "comparator" ? (
+                        <div className="ra-comp-toolbar">
+                          <div className="ra-comp-pill">Comparator Verdict</div>
+                          <button className="ra-comp-copy" type="button" onClick={() => copyComparatorAnswer(item.id, item.content)}>
+                            {copiedComparatorId === item.id ? "Copied" : "Copy Answer"}
+                          </button>
+                        </div>
+                      ) : null}
                       {assistant && item.mode === "reviewer" && item.debug ? renderReviewerRoundEvents(item.debug) : null}
                       {assistant && item.mode === "reviewer" && item.debug && item.debug.final_report ? renderReviewerFinalReportCard(item.debug.final_report) : null}
-                      {assistant ? renderAssistantMarkdown(item.content) : item.content}
+                      {assistant
+                        ? (item.mode === "comparator" ? renderComparatorAnswer(item.content) : renderAssistantMarkdown(item.content))
+                        : item.content}
                       {assistant && item.citations && item.citations.length ? (
                         <div className="ra-cites">
                           <div className="ra-cites-head">
-                            <div className="ra-cites-title">References</div>
+                            <div className="ra-cites-title">{item.mode === "comparator" ? "Evidence" : "References"}</div>
                             <div className="ra-cites-count">{item.citations.length}</div>
                           </div>
-                          {item.citations.map((citation, index) => (
-                            <div className="ra-cite" key={`${item.id}-${index}`}>
-                              <div className="ra-cite-header">
-                                <div className="ra-cite-label">{citation.filename || "Unknown source"}</div>
-                                <div className="ra-cite-badge">[{index + 1}]</div>
-                              </div>
-                              <div className="ra-cite-block">
-                                <div className="ra-cite-meta">
-                                  {citation.page ? `Page ${citation.page}` : "Page n/a"}
-                                  {citation.chunk_id ? ` | ${citation.chunk_id}` : ""}
+                          {item.mode === "comparator" ? (
+                            <div className="ra-comp-cites-grid">
+                              {comparatorCiteGroups.map((group, groupIndex) => (
+                                <div className="ra-cite-group" key={`${item.id}-group-${groupIndex}`}>
+                                  <div className="ra-cite-group-head">{group.filename}</div>
+                                  {group.entries.map(({ citation, index }) => (
+                                    <details className="ra-cite comp" key={`${item.id}-${groupIndex}-${index}`}>
+                                      <summary className="ra-cite-summary">
+                                        <div className="ra-cite-label">[{index + 1}] {citation.page ? `p.${citation.page}` : "page n/a"}</div>
+                                        <div className="ra-cite-meta">{citation.chunk_id ? clip(citation.chunk_id, 28) : "snippet"}</div>
+                                      </summary>
+                                      <div className="ra-cite-block">
+                                        <div className="ra-cite-text">{clip(citation.snippet, 360)}</div>
+                                      </div>
+                                    </details>
+                                  ))}
                                 </div>
-                                <div className="ra-cite-text">{clip(citation.snippet, 260)}</div>
-                              </div>
+                              ))}
                             </div>
+                          ) : item.citations.map((citation, index) => (
+                            <details className="ra-cite" key={`${item.id}-${index}`}>
+                              <summary className="ra-cite-summary">
+                                <div className="ra-cite-label">[{index + 1}] {citation.filename || "Unknown source"}</div>
+                                <div className="ra-cite-meta">{citation.page ? `p.${citation.page}` : "page n/a"}</div>
+                              </summary>
+                              <div className="ra-cite-block">
+                                {citation.chunk_id ? <div className="ra-cite-meta">chunk {clip(citation.chunk_id, 40)}</div> : null}
+                                <div className="ra-cite-text">{clip(citation.snippet, 360)}</div>
+                              </div>
+                            </details>
                           ))}
                         </div>
                       ) : null}

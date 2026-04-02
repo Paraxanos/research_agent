@@ -1,76 +1,124 @@
 # Research Agent
 
-Research Agent is a full-stack paper assistant built for real research workflows: upload PDFs, ask grounded questions, compare papers, draft in your own writing style, and run a two-reviewer debate panel on your work.
+Research Agent is a full-stack paper assistant built for practical research workflows: upload PDFs, run grounded QA, compare papers at claim level, draft in your own style, and run a structured reviewer panel.
 
 This repository includes:
 
-- a React frontend (`research_agent.jsx`)
-- a FastAPI backend (`backend/src/research_agent`)
-- a LangGraph orchestration pipeline for retrieval + generation
-- hybrid retrieval (dense + sparse) with reranking
-- semantic chunking for long-form academic PDFs
+- React frontend (`research_agent.jsx`)
+- FastAPI backend (`backend/src/research_agent`)
+- LangGraph orchestration for retrieval, generation, and validation
+- Hybrid retrieval (dense + sparse) with reranking
+- Semantic chunking for long research PDFs
 
 ## What It Can Do
 
-- Paper-grounded QA with citations (`Local Brain`)
-- Open conversational responses with optional paper grounding (`Global Brain`)
-- Style-aware drafting (`Paper Writer`)
-- Adversarial review simulation (`Reviewer`)
-- Multi-paper comparison (`Comparator`)
+- `Local Brain`: strict paper-grounded QA with citations
+- `Global Brain`: open answers with optional paper grounding
+- `Paper Writer`: style-aware drafting and rewriting
+- `Reviewer`: Claim Trial Engine (Skeptic vs Advocate + Judge + rewrite card)
+- `Comparator`: claim-level paper comparison with decision outputs
 
-## Architecture (High Level)
+## Runtime Graph (All Modes)
 
 ```mermaid
 flowchart LR
-  UI[React Frontend] --> API[/FastAPI/]
-  API --> RT[Runtime]
-  RT --> LG[LangGraph]
-  LG --> PM[prepare_mode]
-  PM --> RET[retrieve]
-  RET --> RR[rerank]
-  RR --> D[draft_answer]
-  D --> V[validate_answer]
-  V --> F[finalize_answer]
-  F --> API
+  UI[React Frontend] --> API[/POST /api/chat/]
+  API --> RT[ResearchAgentRuntime.chat]
+  RT --> PREP[prepare_mode]
+  PREP --> RETR[retrieve]
+  RETR --> RERANK[rerank]
+  RERANK --> DRAFT[draft_answer]
+  DRAFT --> VALID[validate_answer]
+  VALID --> FINAL[finalize_answer]
+  FINAL --> API
 ```
 
-Detailed architecture docs:
+## Reviewer Graph (Claim Trial Engine)
+
+```mermaid
+flowchart TD
+  IN[Reviewer request + selected paper] --> LOAD[Load session state by session_id + paper_id]
+  LOAD --> RETR[Reviewer retrieval subqueries]
+  RETR --> RERANK[Rerank and claim-coverage balancing]
+  RERANK --> VEC[Initialize or reuse attack vectors]
+  VEC --> LOOP{More active vectors?}
+
+  LOOP -->|Yes| DEBATE[Skeptic/Advocate turn generation]
+  DEBATE --> ROUTE{Turn cap or resolution reached?}
+  ROUTE -->|No| DEBATE
+  ROUTE -->|Yes| JUDGE[Evidence-only Judge]
+  JUDGE --> CARD[Rewrite Compiler Card]
+  CARD --> MARK[Store verdict + judgment + vector report]
+  MARK --> LOOP
+
+  LOOP -->|No| FINALREP[Build Reviewer Complete Report]
+  FINALREP --> RENDER[Render markdown panel/report]
+  RENDER --> FINALIZE[finalize_answer]
+```
+
+Reviewer state persisted in runtime memory includes:
+
+- `attack_vectors`, `active_vector_id`, `vectors_remaining`
+- `debate_history`, `debate_summary`, `turn_count`, `next_speaker`
+- `vector_verdicts`, `vector_judgments`, `vector_reports`
+- `syntheses`, `final_report`
+
+## Comparator Graph (Claim Matrix Lab)
+
+```mermaid
+flowchart TD
+  IN[Comparator request + 2..3 selected papers] --> RETR[Per-paper retrieval merge]
+  RETR --> RERANK[Rerank with comparator signals]
+  RERANK --> CHECK{Enough evidence?}
+  CHECK -->|No| FB[Structured comparator fallback]
+  CHECK -->|Yes| GEN[Generate comparator response]
+  GEN --> FORMAT[Sections: Papers Compared, Claim Matrix, Conflict Map, Benchmark Verdict Matrix, Method Trade-offs, Synthesis Blueprint, Decision By Use Case]
+  FB --> VALID[validate_answer]
+  FORMAT --> VALID
+  VALID --> FINAL[finalize_answer + citation reindex]
+```
+
+## Documentation Map
 
 - [Architecture Overview](docs/architecture.md)
-- [Full Walkthrough](docs/architecture_walkthrough.md)
-- [Graph State](docs/graph_state.md)
+- [Architecture Walkthrough](docs/architecture_walkthrough.md)
+- [Graph State and Mode Graphs](docs/graph_state.md)
 
 ## Repository Layout
 
 ```text
 .
-├─ research_agent.jsx                 # Frontend app shell
-├─ index.html                         # Frontend entry page
-├─ docs/
-│  ├─ architecture.md
-│  ├─ architecture_walkthrough.md
-│  └─ graph_state.md
-└─ backend/
-   ├─ pyproject.toml
-   ├─ .env.example
-   └─ src/research_agent/
-      ├─ api.py                       # FastAPI routes
-      ├─ runtime.py                   # Runtime + graph invocation
-      ├─ schemas.py                   # API models
-      ├─ config.py                    # App settings
-      ├─ graph/
-      │  ├─ state.py
-      │  └─ builder.py                # LangGraph pipeline + reviewer arena
-      ├─ retrieval/
-      │  ├─ ingestion.py              # PDF -> chunks -> index
-      │  ├─ chunking.py               # Semantic chunking
-      │  ├─ dense.py                  # Pinecone + fusion
-      │  └─ sparse.py                 # BM25-like lexical retrieval
-      └─ services/
-         ├─ text_generation.py        # Provider router (Groq/Gemini)
-         ├─ groq_text.py
-         ├─ gemini_text.py
-         └─ style_memory.py
+|- research_agent.jsx
+|- index.html
+|- docs/
+|  |- architecture.md
+|  |- architecture_walkthrough.md
+|  |- graph_state.md
+|  |- graph_state.mmd
+|  `- smoke_reports/
+`- backend/
+   |- README.md
+   |- pyproject.toml
+   |- .env.example
+   |- stress_test_outputs.py
+   `- src/research_agent/
+      |- api.py
+      |- runtime.py
+      |- schemas.py
+      |- config.py
+      |- graph/
+      |  |- state.py
+      |  `- builder.py
+      |- retrieval/
+      |  |- ingestion.py
+      |  |- chunking.py
+      |  |- dense.py
+      |  `- sparse.py
+      `- services/
+         |- text_generation.py
+         |- groq_text.py
+         |- gemini_text.py
+         `- style_memory.py
 ```
 
 ## Quick Start
@@ -78,8 +126,8 @@ Detailed architecture docs:
 ### 1) Prerequisites
 
 - Python 3.11+
-- Node.js (only needed for frontend tooling; this repo serves static frontend directly)
-- API keys for your chosen providers
+- Node.js (only needed for frontend tooling)
+- Provider keys for generation/embeddings/vector DB
 
 ### 2) Backend Setup
 
@@ -89,11 +137,6 @@ From repo root:
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -e .\backend
-```
-
-Copy environment template:
-
-```powershell
 Copy-Item .\backend\.env.example .\backend\.env
 ```
 
@@ -111,8 +154,6 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8010/health
 
 ### 3) Frontend Setup
 
-This project currently serves the UI as static files:
-
 ```powershell
 .\.venv\Scripts\python.exe -m http.server 5173 --bind 127.0.0.1
 ```
@@ -121,31 +162,29 @@ Open:
 
 - `http://127.0.0.1:5173/index.html`
 
-## Local Brain Smoke Test
+## Smoke and Stress Checks
 
-Run an end-to-end smoke test (health check, PDF upload, hard Local Brain questions, provider/fallback checks, pass/fail summary):
+Local Brain smoke script:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\smoke_local.ps1 -PdfPath "C:\Users\R Nishanth Reddy\Downloads\EEGMoE_A_Domain-Decoupled_Mixture-of-Experts_Model_for_Self-Supervised_EEG_Representation_Learning.pdf"
 ```
 
-What this script validates:
+Reviewer/Comparator stress harness:
 
-- API is reachable (`/health`)
-- PDF upload works (`/api/papers/upload`)
-- Local mode answers grounded questions with citations
-- Missing facts are correctly rejected
-- Model generation is active (not retrieval-only fallback)
+```powershell
+python .\backend\stress_test_outputs.py
+```
 
-Smoke reports are saved to:
+To save a report:
 
-- `docs/smoke_reports/*.json`
+```powershell
+python .\backend\stress_test_outputs.py > .\docs\smoke_reports\stress_latest.json
+```
 
 ## Configuration
 
-Key settings are defined in `backend/src/research_agent/config.py`.
-
-Important environment variables:
+Key environment variables:
 
 - `GROQ_API_KEY`
 - `GEMINI_API_KEY`
@@ -159,55 +198,20 @@ Important environment variables:
 - `OPENROUTER_MODEL` (default: `openai/gpt-4o-mini`)
 - `EMBEDDING_PROVIDER` (`local`, `auto`, `gemini`)
 
-Retrieval/chunking knobs:
+Important retrieval knobs:
 
-- `retrieval_top_k`
+- `retrieval_top_k`, `rerank_top_n`
 - `hybrid_dense_top_k`, `hybrid_sparse_top_k`
 - `hybrid_dense_weight`, `hybrid_sparse_weight`, `hybrid_rrf_k`
 - `chunk_size`, `chunk_overlap`
 - `semantic_unit_max_chars`, `semantic_similarity_floor`
 
-## Modes
+Reviewer tuning knobs:
 
-### Local Brain
-
-- Strictly grounded in uploaded papers
-- Uses citation-backed answers
-- If evidence is missing, explicitly says it is not in uploaded papers
-
-### Global Brain
-
-- Conversational answer style
-- Uses paper context when relevant
-- Does not force citations for general knowledge responses
-
-### Paper Writer
-
-- Uses style memory learned from uploaded papers
-- Helps draft, rewrite, and structure academic prose
-
-### Reviewer
-
-- Runs a structured Skeptic vs Advocate debate
-- Maintains per-session debate state
-- Produces verdicts and action cards
-
-### Comparator
-
-- Compares selected papers across methods, benchmarks, and claims
-
-## Reviewer Arena Summary
-
-Reviewer mode tracks:
-
-- attack vectors
-- active vector
-- turn history and compressed summary
-- resolution state and turn budget
-- verdict per vector
-- synthesis/action cards
-
-This creates a review workflow that is more interactive than a single monolithic review report.
+- `reviewer_attack_vector_count`
+- `reviewer_max_turns`
+- `reviewer_warning_turn`
+- `reviewer_turns_per_response`
 
 ## API Surface
 
@@ -221,28 +225,19 @@ This creates a review workflow that is more interactive than a single monolithic
 - `POST /api/chat`
 - `POST /api/retrieval/preview`
 
-## Quality And Reliability Notes
+## Reliability Notes
 
 - Retrieval is hybrid dense+sparse with reranking.
-- If generation provider calls fail (rate limits/network), the system enters controlled fallback mode and returns debug metadata.
-- Reviewer state is in-memory in the backend runtime process.
+- If generation providers fail, runtime falls back to structured retrieval-only responses.
+- Reviewer session state is in-memory; process restart clears it.
 
 ## Troubleshooting
 
-- If answers look retrieval-only, inspect `debug.model_fallback` and `debug.model_error`.
-- If citations look irrelevant, inspect `debug.retrieval_preview` and `debug.rerank_preview`.
-- If UI behavior seems stale after updates, hard refresh (`Ctrl+F5`).
-- If backend changes are not reflected, restart uvicorn.
-
-## Contributing Workflow
-
-Typical flow:
-
-1. Create/modify feature in backend or frontend
-2. Run health check + basic chat smoke tests
-3. Commit with clear message
-4. Push to `main` or open PR
+- If output looks fallback-like, inspect `debug.model_fallback` and `debug.model_error`.
+- If citations look weak, inspect `debug.retrieval_preview` and `debug.rerank_preview`.
+- If Reviewer appears stuck, inspect `debug.active_vector_id`, `debug.next_speaker`, `debug.vectors_remaining`.
+- If Comparator feels shallow, verify at least 2 papers selected and check `debug.retrieved_count`.
 
 ---
 
-For deep implementation details and rationale, read [architecture_walkthrough.md](docs/architecture_walkthrough.md).
+For implementation details, read [docs/architecture_walkthrough.md](docs/architecture_walkthrough.md).

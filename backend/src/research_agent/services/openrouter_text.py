@@ -1,4 +1,5 @@
 import json
+import re
 from urllib import error, request
 
 from research_agent.config import AppSettings
@@ -38,11 +39,50 @@ class OpenRouterTextService:
             "temperature": temperature,
             "max_tokens": max_output_tokens,
         }
-        response = self._post(payload)
+        try:
+            response = self._post(payload)
+        except RuntimeError as exc:
+            retry_tokens = self._retry_budget_tokens(
+                error_text=str(exc),
+                requested_tokens=max_output_tokens,
+            )
+            if retry_tokens is None:
+                raise
+            payload["max_tokens"] = retry_tokens
+            response = self._post(payload)
         text = self._extract_text(response)
         if not text:
             raise RuntimeError("OpenRouter response did not include output text.")
         return text
+
+    @staticmethod
+    def _retry_budget_tokens(*, error_text: str, requested_tokens: int) -> int | None:
+        lower = (error_text or "").lower()
+        budget_markers = (
+            "requires more credits",
+            "fewer max_tokens",
+            "can only afford",
+            "insufficient credits",
+            "not enough credits",
+            "credit limit",
+            "insufficient_balance",
+        )
+        if not any(marker in lower for marker in budget_markers):
+            return None
+
+        requested = max(1, int(requested_tokens))
+        affordable_match = re.search(r"can only afford\s+(\d+)", error_text, flags=re.IGNORECASE)
+        affordable = int(affordable_match.group(1)) if affordable_match else 0
+        fallback = int(requested * 0.6)
+        candidate = affordable if affordable > 0 else fallback
+        # Keep enough room for completion text while still shrinking meaningfully.
+        min_retry = 128
+        candidate = max(min_retry, candidate)
+        if candidate >= requested:
+            candidate = max(min_retry, requested - 64)
+        if candidate >= requested:
+            return None
+        return candidate
 
     def _post(self, payload: dict) -> dict:
         endpoint = "https://openrouter.ai/api/v1/chat/completions"
