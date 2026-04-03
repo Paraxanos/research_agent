@@ -1,8 +1,12 @@
 # LangGraph State Graph
 
-This diagram reflects the exact execution order and state mutations in `backend/src/research_agent/graph/builder.py`.
+This file documents the execution order and mode-specific branch behavior in:
 
-## Diagram (Mermaid)
+- `backend/src/research_agent/graph/builder.py`
+- `backend/src/research_agent/graph/state.py`
+
+## 1) Shared Graph
+
 ```mermaid
 flowchart TD
   START([START]) --> PREP[prepare_mode]
@@ -13,47 +17,81 @@ flowchart TD
   VALID --> FINAL[finalize_answer]
   FINAL --> END([END])
 
-  subgraph "Process Order"
-    P1["1. START: Graph invoked with session_id, mode, message, paper_ids, review_paper_id, history"]
-    P2["2. prepare_mode: set mode_instructions, debug.prepared_mode, debug.paper_count"]
-    P3["3. retrieve: mode-aware retrieval, collect candidates, retrieval debug"]
-    P4["4. rerank: lexical + section-signal rerank, comparator balancing, citations"]
-    P5["5. draft_answer: generate first grounded draft with citations"]
-    P6["6. validate_answer: second-pass factual validator revises unsupported claims"]
-    P7["7. finalize_answer: select final answer and attach citations/debug"]
-  end
-
-  START -.-> P1
-  PREP -.-> P2
-  RETR -.-> P3
-  RERANK -.-> P4
-  DRAFT -.-> P5
-  VALID -.-> P6
-  FINAL -.-> P7
+  DRAFT -. mode=reviewer .-> REV[Reviewer engine branch]
+  DRAFT -. mode=comparator .-> COMP[Comparator branch]
 ```
 
-## Exact Process Order
-1. START: `runtime.chat()` invokes the graph with the initial state.
-2. prepare_mode: `_prepare_mode_step` sets `mode_instructions` and debug fields.
-3. retrieve: `_retrieve_step` selects retrieval strategy by mode and returns candidate `retrieved_documents` with retrieval debug.
-4. rerank: `_rerank_step` reorders candidates using lexical overlap, section-signal boosts, and paper balancing for comparator mode.
-5. draft_answer: `_draft_answer_step` validates mode constraints and generates an initial grounded draft.
-6. validate_answer: `_validate_answer_step` runs a factual verifier pass that revises unsupported claims.
-7. finalize_answer: `_finalize_answer_step` selects the best final answer, returns `answer`, `citations`, and debug.
-8. END: graph returns final state to the API.
+## 2) Reviewer Branch Graph
 
-## State Fields (GraphState)
-- session_id
-- mode
-- message
-- paper_ids
-- review_paper_id
-- history
-- mode_instructions
-- retrieved_documents
-- draft_answer
-- validated_answer
-- validation_issues
-- answer
-- citations
-- debug
+```mermaid
+flowchart TD
+  R0[Load reviewer session state] --> R1[Normalize or generate attack vectors]
+  R1 --> R2[Select active vector]
+  R2 --> R3{Score request?}
+
+  R3 -->|Yes| R4[Return scorecard]
+  R3 -->|No| R5[Debate loop: skeptic/advocate turns]
+
+  R5 --> R6{Synthesis condition met?}
+  R6 -->|No| R5
+  R6 -->|Yes| R7[Evidence-only judge verdict]
+  R7 --> R8[Rewrite Compiler synthesis]
+  R8 --> R9[Update vector verdict/judgment/report]
+  R9 --> R10{More vectors remain?}
+  R10 -->|Yes| R5
+  R10 -->|No| R11[Build final_report]
+
+  R4 --> R12[Render reviewer markdown]
+  R11 --> R12
+  R12 --> R13[Persist reviewer state keys]
+```
+
+## 3) Comparator Branch Graph
+
+```mermaid
+flowchart TD
+  C0[Input: paper_ids and user comparison message] --> C1[Retrieve top chunks per paper]
+  C1 --> C2[Merge + dedupe]
+  C2 --> C3[Rerank with comparator focus]
+  C3 --> C4{Enough papers and evidence?}
+  C4 -->|No| C5[Structured comparator fallback]
+  C4 -->|Yes| C6[Generate comparator response]
+  C6 --> C7[Enforce comparator section structure]
+  C5 --> C8[validate_answer]
+  C7 --> C8
+  C8 --> C9[finalize_answer + citation selection]
+```
+
+## 4) Exact Node Order
+
+1. START: runtime invokes compiled graph with request payload.
+2. `prepare_mode`: mode instruction + initial debug metadata.
+3. `retrieve`: mode-specific retrieval strategy.
+4. `rerank`: scoring and balanced selection.
+5. `draft_answer`: mode branch execution (reviewer/comparator/local/global/writer).
+6. `validate_answer`: validation model pass or branch-specific bypass.
+7. `finalize_answer`: final answer + citations + debug.
+8. END: return to runtime/API.
+
+## 5) GraphState Fields
+
+Core fields:
+
+- `session_id`, `mode`, `message`, `paper_ids`, `review_paper_id`, `history`
+- `mode_instructions`, `retrieved_documents`
+- `draft_answer`, `validated_answer`, `validation_issues`
+- `answer`, `citations`, `debug`
+
+Reviewer fields:
+
+- `attack_vectors`, `active_vector_id`, `vectors_remaining`
+- `debate_history`, `debate_summary`
+- `skeptic_position`, `advocate_position`, `resolution`, `turn_count`, `next_speaker`
+- `syntheses`, `vector_verdicts`, `vector_judgments`, `vector_reports`, `final_report`
+- `intervention_mode`
+
+## 6) Persistence Notes
+
+- Reviewer session keys are extracted with `extract_reviewer_state()` and stored in runtime memory.
+- Reviewer state is scoped by `session_id::paper_id`.
+- Clearing/deleting papers removes linked reviewer state.

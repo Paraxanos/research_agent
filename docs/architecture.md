@@ -1,67 +1,68 @@
 # Research Agent Architecture
 
-This workspace is now the clean build target for the full research agent.
+This document is the short architecture brief. For full implementation detail, see:
 
-Detailed walkthrough:
+- [Architecture Walkthrough](architecture_walkthrough.md)
+- [Graph State](graph_state.md)
 
-- `docs/architecture_walkthrough.md`
+## System Shape
 
-## Why We Pivoted
+- Frontend: React single-file shell (`research_agent.jsx`)
+- Backend API: FastAPI (`backend/src/research_agent/api.py`)
+- Runtime orchestration: LangGraph (`backend/src/research_agent/graph/builder.py`)
+- Retrieval: dense + sparse + rerank
+- Dense vector store: Pinecone
+- Generation providers: Groq, Gemini, OpenRouter (router + fallback order)
 
-The original single-file React artifact spec is good for a class demo, but it is not the best foundation for a serious research assistant. We are keeping the UI shell as a fast preview, but the production path is:
+## End-to-End Graph
 
-- React frontend
-- FastAPI backend
-- LangGraph orchestration
-- LangChain model integration
-- Pinecone vector database
-- Gemini embeddings
-- Grok generation
+```mermaid
+flowchart LR
+  UI[Frontend] --> API[/api/chat/]
+  API --> RT[ResearchAgentRuntime]
+  RT --> PREP[prepare_mode]
+  PREP --> RETR[retrieve]
+  RETR --> RERANK[rerank]
+  RERANK --> DRAFT[draft_answer]
+  DRAFT --> VALID[validate_answer]
+  VALID --> FINAL[finalize_answer]
+  FINAL --> API
+```
 
-This gives us better separation of concerns, safer key handling, stronger retrieval, and room for evaluation and observability.
+## Reviewer and Comparator Paths
 
-## Planned System Shape
+The graph pipeline is shared, but `draft_answer` branches into specialized mode logic:
 
-### Frontend
+- `Reviewer`: Claim Trial Engine with attack vectors, Skeptic/Advocate turns, Evidence-only Judge, Rewrite Compiler card, and final panel report.
+- `Comparator`: claim-level multi-paper comparison with strict section structure and fallback-safe structured output.
 
-- Existing `research_agent.jsx` shell stays as the visual starting point.
-- It now calls backend endpoints for upload, retrieval-backed chat, and style profile state.
-- Reviewer and Comparator mode controls will stay in the UI.
+See diagrams in:
 
-### Backend
+- [README Reviewer Graph](../README.md)
+- [README Comparator Graph](../README.md)
+- [Graph State](graph_state.md)
 
-- `backend/src/research_agent/api.py`
-  - FastAPI application and HTTP routes
-- `backend/src/research_agent/runtime.py`
-  - Runtime entrypoint that invokes the compiled LangGraph
-- `backend/src/research_agent/graph/`
-  - State definition and graph builder
-- `backend/src/research_agent/config.py`
-  - Typed app settings
-- `backend/src/research_agent/schemas.py`
-  - Request and response models
+## Storage and State
 
-### Retrieval and Ingestion
+Persistent on disk:
 
-Implemented now:
+- uploaded PDFs
+- extracted text/chunks metadata
+- paper catalog
+- style profile
 
-- PDF upload endpoint
-- PDF parsing with `pypdf`
-- Chunking with LangChain text splitters
-- Pinecone indexing with Gemini embeddings
-- Mode-specific retrieval and prompt assembly
-- Persistent style profile storage for writer mode
+Persistent in Pinecone:
 
-## Retrieval Note
+- dense embedding vectors
 
-We are using Pinecone's managed approximate nearest-neighbor retrieval path. I did not find an official user-facing HNSW configuration option in Pinecone's current serverless index docs, so the implementation does not fake an HNSW setting that the provider does not expose.
+In-memory runtime state:
 
-## Build Milestones
+- reviewer sessions keyed by `(session_id, review_paper_id)`
+- fields include `vector_judgments`, `vector_reports`, `final_report`
 
-1. Backend foundation: config, schemas, FastAPI, LangGraph skeleton
-2. PDF ingestion pipeline and Pinecone vector storage
-3. Global Brain end-to-end chat
-4. Local Brain grounded retrieval with citations
-5. Reviewer and Comparator workflows
-6. Writer mode with style memory
-7. Session memory, evaluation, and polish
+## Why This Layout
+
+- Keeps API keys and provider logic in backend only
+- Makes retrieval and generation independently testable
+- Supports deep mode-specific behavior without forking APIs
+- Preserves explainability via debug payloads and citations

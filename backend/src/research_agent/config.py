@@ -37,7 +37,7 @@ class AppSettings(BaseSettings):
         alias="GENERATION_PROVIDER",
     )
     generation_fallback_order: str = Field(
-        default="gemini,openrouter,groq",
+        default="groq,openrouter,gemini",
         alias="GENERATION_FALLBACK_ORDER",
     )
     generation_provider_cooldown_seconds: int = Field(

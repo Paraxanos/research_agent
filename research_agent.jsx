@@ -58,11 +58,41 @@ const CSS = `
   .ra-tag { margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
   .ra-user-bubble { padding: 12px 16px; border-radius: 18px 18px 6px 18px; color: white; white-space: pre-wrap; line-height: 1.55; }
   .ra-assistant-bubble { padding: 16px; border-radius: 18px 18px 18px 6px; background: #181c2e; color: #f3f8ff; white-space: pre-wrap; line-height: 1.6; }
+  .ra-assistant-bubble.local { background: linear-gradient(165deg, rgba(14,24,40,.96), rgba(10,18,32,.98)); border: 1px solid rgba(96,165,250,.22); }
   .ra-assistant-bubble.reviewer { background: linear-gradient(160deg, rgba(27,22,14,.96), rgba(26,29,47,.96)); border: 1px solid rgba(251,146,60,.28); box-shadow: inset 0 0 0 1px rgba(251,146,60,.08); }
   .ra-assistant-bubble.reviewer .ra-md-h2 { color: #ffd9b3; }
   .ra-assistant-bubble.reviewer .ra-md-h3 { color: #ffe7ce; }
   .ra-assistant-bubble.reviewer .ra-md-p { color: #fde8d4; }
   .ra-assistant-bubble.reviewer .ra-md-ul li { color: #f7dcc0; }
+  .ra-assistant-bubble.comparator { background: linear-gradient(165deg, rgba(12,20,34,.97), rgba(10,16,28,.99)); border: 1px solid rgba(120,146,199,.3); box-shadow: inset 0 0 0 1px rgba(120,146,199,.08); }
+  .ra-assistant-bubble.comparator .ra-md-h2 { color: #e8f1ff; }
+  .ra-assistant-bubble.comparator .ra-md-h3 { color: #f0f6ff; }
+  .ra-assistant-bubble.comparator .ra-md-p { color: #d7e5ff; line-height: 1.78; }
+  .ra-assistant-bubble.comparator .ra-md-ul li { color: #d9e5fb; }
+  .ra-assistant.comparator-message { max-width: 96%; }
+  .ra-comp-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .ra-comp-pill { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #d7e8ff; border: 1px solid rgba(120,146,199,.42); background: rgba(120,146,199,.16); border-radius: 999px; padding: 4px 10px; font-weight: 600; }
+  .ra-comp-copy { border: 1px solid rgba(120,146,199,.45); background: rgba(120,146,199,.14); color: #eaf3ff; border-radius: 10px; font-size: 11px; padding: 5px 10px; cursor: pointer; font-weight: 600; }
+  .ra-comp-copy:hover { background: rgba(120,146,199,.24); }
+  .ra-comp-shell { display: flex; flex-direction: column; gap: 12px; }
+  .ra-comp-preface { padding: 14px 14px 8px 14px; border-radius: 12px; border: 1px solid rgba(120,146,199,.24); background: rgba(17,27,44,.75); }
+  .ra-comp-outline { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ra-comp-outline-chip { padding: 5px 10px; border-radius: 999px; border: 1px solid rgba(120,146,199,.3); background: rgba(120,146,199,.12); color: #dce9ff; font-size: 11px; }
+  .ra-comp-sections { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .ra-comp-section { border-radius: 14px; border: 1px solid rgba(120,146,199,.24); background: linear-gradient(160deg, rgba(19,30,47,.8), rgba(14,24,39,.82)); padding: 14px; box-shadow: 0 12px 24px rgba(0,0,0,.17); }
+  .ra-comp-section.claim-matrix { border-left: 4px solid rgba(96,165,250,.72); }
+  .ra-comp-section.conflict-map { border-left: 4px solid rgba(251,146,60,.72); }
+  .ra-comp-section.benchmark-verdict-matrix { border-left: 4px solid rgba(52,211,153,.72); }
+  .ra-comp-section.synthesis-blueprint { border-left: 4px solid rgba(244,114,182,.72); }
+  .ra-comp-section.decision-by-use-case { border-left: 4px solid rgba(250,204,21,.72); }
+  .ra-comp-section-head { display: flex; align-items: center; gap: 10px; margin-bottom: 11px; }
+  .ra-comp-section-index { min-width: 32px; height: 24px; border-radius: 8px; display: grid; place-items: center; font-size: 11px; font-weight: 600; color: #d7e7ff; background: rgba(120,146,199,.16); border: 1px solid rgba(120,146,199,.36); }
+  .ra-comp-section-title { margin: 0; font-size: 15px; color: #eef4ff; font-weight: 600; letter-spacing: .01em; }
+  .ra-assistant-bubble.comparator .ra-md-h2 { margin: 0 0 8px 0; }
+  .ra-assistant-bubble.comparator .ra-md-table-wrap { border-color: rgba(120,146,199,.28); background: rgba(17,28,44,.68); }
+  .ra-assistant-bubble.comparator .ra-md-table th { background: rgba(31,47,71,.84); color: #edf4ff; }
+  .ra-assistant-bubble.comparator .ra-md-table td { color: #dce9ff; }
+  .ra-assistant-bubble.comparator .ra-md-table tbody tr:nth-child(even) td { background: rgba(24,37,57,.45); }
   .ra-review-live { margin-bottom: 12px; border-radius: 14px; border: 1px solid rgba(251,146,60,.3); background: rgba(39,26,14,.55); padding: 10px; }
   .ra-review-live-head { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: #ffd7ac; margin-bottom: 8px; }
   .ra-review-live-list { display: grid; gap: 8px; }
@@ -97,19 +127,36 @@ const CSS = `
   .ra-md-p { margin: 0 0 10px 0; color: #dce8ff; line-height: 1.6; }
   .ra-md-ul, .ra-md-ol { margin: 0 0 10px 20px; padding: 0; color: #dce8ff; }
   .ra-md-ul li, .ra-md-ol li { margin: 0 0 6px 0; line-height: 1.55; }
-  .ra-md-strong { color: #ffffff; font-weight: 700; }
+  .ra-md-table-wrap { margin: 0 0 12px 0; overflow-x: auto; border: 1px solid rgba(149,170,210,.2); border-radius: 12px; }
+  .ra-md-table { width: 100%; min-width: 560px; border-collapse: collapse; background: rgba(10,16,30,.86); }
+  .ra-md-table th, .ra-md-table td { border-bottom: 1px solid rgba(149,170,210,.16); padding: 9px 10px; text-align: left; vertical-align: top; font-size: 12px; line-height: 1.5; }
+  .ra-md-table th { background: rgba(30,40,66,.9); color: #eef5ff; font-weight: 700; }
+  .ra-md-table td { color: #d6e4ff; }
+  .ra-md-table tr:last-child td { border-bottom: none; }
+  .ra-md-strong { color: #ffffff; font-weight: 550; }
+  .ra-assistant-bubble.comparator .ra-md-strong { color: #e6f0ff; font-weight: 500; }
   .ra-md-code { padding: 1px 6px; border-radius: 6px; background: rgba(96,165,250,.2); border: 1px solid rgba(96,165,250,.38); color: #cfe3ff; font-family: "IBM Plex Mono","Consolas",monospace; font-size: 12px; }
+  .ra-md-math-inline { padding: 1px 6px; border-radius: 6px; border: 1px solid rgba(148,163,184,.36); background: rgba(15,23,42,.55); color: #edf4ff; display: inline-block; }
+  .ra-md-math-block { margin: 0 0 12px 0; border-radius: 12px; border: 1px solid rgba(148,163,184,.32); background: linear-gradient(165deg, rgba(12,19,33,.92), rgba(9,15,27,.94)); padding: 12px; overflow-x: auto; }
+  .ra-md-math-fallback { margin: 0; color: #e7f0ff; font-family: "Times New Roman","Cambria Math","IBM Plex Serif",serif; font-size: 16px; line-height: 1.5; white-space: pre-wrap; }
+  .ra-md-math-inline-fallback { font-family: "Times New Roman","Cambria Math","IBM Plex Serif",serif; font-style: italic; font-size: 15px; }
   .ra-cites { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(145,164,203,.14); }
   .ra-cites-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .ra-cites-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #9cb3da; font-weight: 700; }
   .ra-cites-count { min-width: 22px; height: 22px; padding: 0 8px; border-radius: 999px; background: rgba(96,165,250,.14); border: 1px solid rgba(96,165,250,.34); color: #b9d4ff; font-size: 11px; display: grid; place-items: center; font-weight: 700; }
   .ra-cite { padding: 12px 14px; border-radius: 12px; background: rgba(10,16,30,.88); border: 1px solid rgba(145,164,203,.16); }
-  .ra-cite-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+  .ra-cite-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; }
+  .ra-cite-summary::-webkit-details-marker { display: none; }
   .ra-cite-label { font-size: 12px; font-weight: 700; color: #e3eeff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ra-cite-badge { padding: 2px 7px; border-radius: 999px; background: rgba(96,165,250,.15); border: 1px solid rgba(96,165,250,.35); font-size: 10px; letter-spacing: .06em; color: #9ec6ff; font-weight: 700; }
-  .ra-cite-meta { font-size: 11px; color: #95a9ce; }
+  .ra-cite-meta { font-size: 11px; color: #95a9ce; white-space: nowrap; }
   .ra-cite-text { font-size: 12px; line-height: 1.55; color: #a9bddf; }
-  .ra-cite-block { display: flex; flex-direction: column; gap: 6px; }
+  .ra-cite-block { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .ra-comp-cites-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .ra-cite-group { border: 1px solid rgba(236,143,198,.24); border-radius: 12px; background: rgba(31,15,32,.52); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .ra-cite-group-head { font-size: 12px; font-weight: 700; color: #ffe4f4; border-bottom: 1px solid rgba(236,143,198,.2); padding-bottom: 6px; margin-bottom: 2px; }
+  .ra-cite.comp { background: rgba(17,12,25,.72); border-color: rgba(236,143,198,.2); }
+  @media (max-width: 860px) { .ra-comp-cites-grid { grid-template-columns: 1fr; } }
   .ra-error { padding: 12px 14px; border-radius: 14px; background: rgba(61,20,28,.9); border: 1px solid rgba(251,146,60,.35); color: #ffd0ad; font-size: 13px; }
   .ra-dots { display: flex; gap: 8px; padding-left: 24px; }
   .ra-pulse { width: 8px; height: 8px; border-radius: 999px; animation: raPulse 1.2s infinite ease-in-out; }
@@ -197,15 +244,44 @@ function simplifyError(detail) {
   return text || "Request failed.";
 }
 
+function renderLatex(expression, { displayMode = false, key } = {}) {
+  const latex = String(expression || "").trim();
+  if (!latex) return null;
+  const katex = typeof window !== "undefined" ? window.katex : null;
+  if (katex && typeof katex.renderToString === "function") {
+    try {
+      const html = katex.renderToString(latex, { displayMode, throwOnError: false, strict: "ignore" });
+      if (displayMode) {
+        return <div key={key} className="ra-md-math-block" dangerouslySetInnerHTML={{ __html: html }} />;
+      }
+      return <span key={key} className="ra-md-math-inline" dangerouslySetInnerHTML={{ __html: html }} />;
+    } catch (_error) {
+      // Fall through to graceful text fallback.
+    }
+  }
+
+  if (displayMode) {
+    return (
+      <div key={key} className="ra-md-math-block">
+        <pre className="ra-md-math-fallback">{latex}</pre>
+      </div>
+    );
+  }
+  return <code key={key} className="ra-md-math-inline ra-md-math-inline-fallback">{latex}</code>;
+}
+
 function renderInlineSegments(text, keyPrefix = "seg") {
   const raw = String(text || "");
-  const tokens = raw.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+  const tokens = raw.split(/(\*\*[^*]+\*\*|`[^`]+`|\$[^$\n]+\$)/g).filter(Boolean);
   return tokens.map((token, index) => {
     if (/^\*\*[^*]+\*\*$/.test(token)) {
       return <strong key={`${keyPrefix}-b-${index}`} className="ra-md-strong">{token.slice(2, -2)}</strong>;
     }
     if (/^`[^`]+`$/.test(token)) {
       return <code key={`${keyPrefix}-c-${index}`} className="ra-md-code">{token.slice(1, -1)}</code>;
+    }
+    if (/^\$[^$\n]+\$$/.test(token)) {
+      return renderLatex(token.slice(1, -1), { displayMode: false, key: `${keyPrefix}-m-${index}` });
     }
     return <React.Fragment key={`${keyPrefix}-t-${index}`}>{token}</React.Fragment>;
   });
@@ -216,6 +292,10 @@ function renderAssistantMarkdown(content) {
   const blocks = [];
   let listType = null;
   let listItems = [];
+  let tableRows = [];
+  let inMathBlock = false;
+  let mathLines = [];
+  let mathDelimiter = "$$";
   let key = 0;
 
   const flushList = () => {
@@ -230,14 +310,116 @@ function renderAssistantMarkdown(content) {
     listItems = [];
   };
 
+  const parseTableCells = (row) =>
+    String(row || "")
+      .trim()
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((cell) => cell.trim());
+
+  const isSeparatorRow = (cells) =>
+    cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+
+  const flushTable = () => {
+    if (!tableRows.length) return;
+    const parsedRows = tableRows.map(parseTableCells).filter((cells) => cells.length > 0);
+    tableRows = [];
+    if (!parsedRows.length) return;
+    const rows = parsedRows.filter((cells) => !isSeparatorRow(cells));
+    if (!rows.length) return;
+
+    const header = rows[0];
+    const bodyRows = rows.slice(1);
+    blocks.push(
+      <div key={`tbl-wrap-${key++}`} className="ra-md-table-wrap">
+        <table className="ra-md-table">
+          <thead>
+            <tr>
+              {header.map((cell, index) => (
+                <th key={`th-${index}`}>{renderInlineSegments(cell, `th-${index}`)}</th>
+              ))}
+            </tr>
+          </thead>
+          {bodyRows.length ? (
+            <tbody>
+              {bodyRows.map((row, rowIndex) => (
+                <tr key={`tr-${rowIndex}`}>
+                  {header.map((_, columnIndex) => (
+                    <td key={`td-${rowIndex}-${columnIndex}`}>
+                      {renderInlineSegments(row[columnIndex] || "", `td-${rowIndex}-${columnIndex}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          ) : null}
+        </table>
+      </div>,
+    );
+  };
+
+  const flushMathBlock = () => {
+    if (!mathLines.length) return;
+    const latex = mathLines.join("\n").trim();
+    mathLines = [];
+    if (!latex) return;
+    blocks.push(renderLatex(latex, { displayMode: true, key: `math-${key++}` }));
+  };
+
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!trimmed) {
-      flushList();
+
+    if (inMathBlock) {
+      if (
+        (mathDelimiter === "$$" && trimmed === "$$")
+        || (mathDelimiter === "\\[" && trimmed === "\\]")
+      ) {
+        flushMathBlock();
+        inMathBlock = false;
+        mathDelimiter = "$$";
+      } else {
+        mathLines.push(line);
+      }
       continue;
     }
 
-    const orderedMatch = trimmed.match(/^(\d+)\.\s+(.+)/);
+    const singleLineDollarMath = trimmed.match(/^\$\$(.+)\$\$$/);
+    const singleLineBracketMath = trimmed.match(/^\\\[(.+)\\\]$/);
+    if (singleLineDollarMath || singleLineBracketMath) {
+      flushList();
+      flushTable();
+      const latex = (singleLineDollarMath ? singleLineDollarMath[1] : singleLineBracketMath[1]).trim();
+      if (latex) {
+        blocks.push(renderLatex(latex, { displayMode: true, key: `math-single-${key++}` }));
+      }
+      continue;
+    }
+
+    if (trimmed === "$$" || trimmed === "\\[") {
+      flushList();
+      flushTable();
+      inMathBlock = true;
+      mathDelimiter = trimmed === "\\[" ? "\\[" : "$$";
+      mathLines = [];
+      continue;
+    }
+
+    if (!trimmed) {
+      flushList();
+      flushTable();
+      continue;
+    }
+
+    if (/^\|.*\|$/.test(trimmed)) {
+      flushList();
+      tableRows.push(trimmed);
+      continue;
+    }
+
+    flushTable();
+
+    const orderedMatch = trimmed.match(/^\s*(\d+)\.\s+(.+)/);
     if (orderedMatch) {
       if (listType && listType !== "ol") flushList();
       listType = "ol";
@@ -245,7 +427,7 @@ function renderAssistantMarkdown(content) {
       continue;
     }
 
-    const unorderedMatch = trimmed.match(/^[-*]\s+(.+)/);
+    const unorderedMatch = trimmed.match(/^\s*[-*+]\s+(.+)/);
     if (unorderedMatch) {
       if (listType && listType !== "ul") flushList();
       listType = "ul";
@@ -270,39 +452,139 @@ function renderAssistantMarkdown(content) {
     blocks.push(<p key={`p-${key++}`} className="ra-md-p">{renderInlineSegments(trimmed, `p-${key}`)}</p>);
   }
 
+  flushMathBlock();
   flushList();
+  flushTable();
   return <div className="ra-md">{blocks.length ? blocks : <p className="ra-md-p">{content}</p>}</div>;
+}
+
+const COMPARATOR_SECTION_TITLES = [
+  "Papers Compared",
+  "Claim Matrix",
+  "Conflict Map",
+  "Benchmark Verdict Matrix",
+  "Method Trade-offs",
+  "Synthesis Blueprint",
+  "Decision By Use Case",
+];
+
+function normalizeComparatorMarkdown(content) {
+  let normalized = String(content || "").replace(/\r\n/g, "\n");
+  for (const title of COMPARATOR_SECTION_TITLES) {
+    const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const linePattern = new RegExp(`^\\s*${escaped}\\b\\s*:?(.*)$`, "gmi");
+    normalized = normalized.replace(linePattern, (full, tail) => {
+      const trimmed = String(full || "").trim();
+      if (trimmed.startsWith("#")) return full;
+      const rest = String(tail || "").trim();
+      return rest ? `## ${title}\n${rest}` : `## ${title}`;
+    });
+  }
+  return normalized;
+}
+
+function splitComparatorSections(content) {
+  const lines = String(content || "").split("\n");
+  const sections = [];
+  const introLines = [];
+  let currentTitle = "";
+  let currentLines = [];
+
+  const flushSection = () => {
+    if (!currentTitle) return;
+    sections.push({
+      title: currentTitle,
+      body: currentLines.join("\n").trim(),
+    });
+    currentTitle = "";
+    currentLines = [];
+  };
+
+  for (const line of lines) {
+    const headingMatch = line.trim().match(/^##\s+(.+)$/);
+    if (headingMatch) {
+      flushSection();
+      currentTitle = headingMatch[1].trim();
+      continue;
+    }
+    if (currentTitle) {
+      currentLines.push(line);
+    } else {
+      introLines.push(line);
+    }
+  }
+  flushSection();
+  return {
+    intro: introLines.join("\n").trim(),
+    sections,
+  };
+}
+
+function comparatorSectionClass(title) {
+  const slug = String(title || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "general";
+}
+
+function renderComparatorAnswer(content) {
+  const normalized = normalizeComparatorMarkdown(content);
+  const { intro, sections } = splitComparatorSections(normalized);
+  if (!sections.length) {
+    return renderAssistantMarkdown(normalized);
+  }
+
+  return (
+    <div className="ra-comp-shell">
+      {intro ? <div className="ra-comp-preface">{renderAssistantMarkdown(intro)}</div> : null}
+      <div className="ra-comp-outline">
+        {sections.map((section, index) => (
+          <span key={`outline-${index}`} className="ra-comp-outline-chip">
+            {index + 1}. {section.title}
+          </span>
+        ))}
+      </div>
+      <div className="ra-comp-sections">
+        {sections.map((section, index) => (
+          <section key={`sec-${index}`} className={`ra-comp-section ${comparatorSectionClass(section.title)}`}>
+            <div className="ra-comp-section-head">
+              <span className="ra-comp-section-index">{String(index + 1).padStart(2, "0")}</span>
+              <h3 className="ra-comp-section-title">{section.title}</h3>
+            </div>
+            {renderAssistantMarkdown(section.body || "No detail provided.")}
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function groupCitationsByFilename(citations) {
+  const grouped = new Map();
+  (citations || []).forEach((citation, index) => {
+    const filename = String(citation?.filename || "Unknown source");
+    if (!grouped.has(filename)) {
+      grouped.set(filename, []);
+    }
+    grouped.get(filename).push({ citation, index });
+  });
+  return Array.from(grouped.entries()).map(([filename, entries]) => ({ filename, entries }));
 }
 
 function renderReviewerFinalReportCard(report) {
   if (!report || typeof report !== "object") return null;
-  const agreements = Array.isArray(report.agreements) ? report.agreements.filter(Boolean) : [];
-  const disagreements = Array.isArray(report.disagreements) ? report.disagreements.filter(Boolean) : [];
   const commonPoints = Array.isArray(report.common_points) ? report.common_points.filter(Boolean) : [];
-  const suggestions = Array.isArray(report.final_suggestions) ? report.final_suggestions.filter(Boolean) : [];
   const confidence = Number.isFinite(Number(report.confidence)) ? Number(report.confidence) : null;
 
   return (
     <div className="ra-review-report">
       <div className="ra-review-head">
-        <div className="ra-review-title">Final Debate Report</div>
-        <div className="ra-review-chip">{confidence !== null ? `confidence ${(confidence * 100).toFixed(0)}%` : "panel summary"}</div>
+        <div className="ra-review-title">Panel Snapshot</div>
+        <div className="ra-review-chip">{confidence !== null ? `confidence ${(confidence * 100).toFixed(0)}%` : "executive summary"}</div>
       </div>
       <div className="ra-review-overview">{report.overview || "Final panel summary is ready."}</div>
-      <div className="ra-review-grid">
-        <div className="ra-review-col">
-          <h4>Agreements</h4>
-          <ul>
-            {(agreements.length ? agreements : ["No explicit agreements captured."]).map((item, idx) => <li key={`agr-${idx}`}>{item}</li>)}
-          </ul>
-        </div>
-        <div className="ra-review-col">
-          <h4>Major Disagreements</h4>
-          <ul>
-            {(disagreements.length ? disagreements : ["No major disagreements captured."]).map((item, idx) => <li key={`dis-${idx}`}>{item}</li>)}
-          </ul>
-        </div>
-      </div>
       <div className="ra-review-col" style={{ marginBottom: 10 }}>
         <h4>Common Points</h4>
         <ul>
@@ -312,22 +594,16 @@ function renderReviewerFinalReportCard(report) {
       <div className="ra-review-grid" style={{ marginBottom: 10 }}>
         <div className="ra-review-col">
           <h4>Skeptic Conclusion</h4>
-          <ul><li>{report.skeptic_conclusion || "Not available."}</li></ul>
+          <div className="ra-review-overview">{report.skeptic_conclusion || "Not available."}</div>
         </div>
         <div className="ra-review-col">
           <h4>Advocate Conclusion</h4>
-          <ul><li>{report.advocate_conclusion || "Not available."}</li></ul>
+          <div className="ra-review-overview">{report.advocate_conclusion || "Not available."}</div>
         </div>
       </div>
       <div className="ra-review-col" style={{ marginBottom: 10 }}>
         <h4>Joint Conclusion</h4>
-        <ul><li>{report.joint_conclusion || "Not available."}</li></ul>
-      </div>
-      <div className="ra-review-col" style={{ marginBottom: 10 }}>
-        <h4>Final Suggestions</h4>
-        <ul>
-          {(suggestions.length ? suggestions : ["No final suggestions captured."]).map((item, idx) => <li key={`sug-${idx}`}>{item}</li>)}
-        </ul>
+        <div className="ra-review-overview">{report.joint_conclusion || "Not available."}</div>
       </div>
       <div className="ra-review-decision">
         <div className="ra-review-decision-title">Final Decision</div>
@@ -407,6 +683,7 @@ function ResearchAgent() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [copiedComparatorId, setCopiedComparatorId] = useState("");
   const fileRef = useRef(null);
   const scrollRef = useRef(null);
   const didInitialResetRef = useRef(false);
@@ -557,7 +834,7 @@ function ResearchAgent() {
     }
     if (!message) return;
 
-    const historyPayload = compactHistory();
+    const historyPayload = activeMode === "comparator" ? [] : compactHistory();
     setDraft("");
     setError("");
     setLoading(true);
@@ -596,6 +873,30 @@ function ResearchAgent() {
       event.preventDefault();
       send();
     }
+  }
+
+  async function copyComparatorAnswer(messageId, content) {
+    const text = String(content || "").trim();
+    if (!text) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const probe = document.createElement("textarea");
+        probe.value = text;
+        probe.setAttribute("readonly", "true");
+        probe.style.position = "absolute";
+        probe.style.left = "-9999px";
+        document.body.appendChild(probe);
+        probe.select();
+        document.execCommand("copy");
+        document.body.removeChild(probe);
+      }
+      setCopiedComparatorId(messageId);
+      setTimeout(() => {
+        setCopiedComparatorId((current) => (current === messageId ? "" : current));
+      }, 1400);
+    } catch (err) {}
   }
 
   return (
@@ -798,35 +1099,64 @@ function ResearchAgent() {
                 const mode = modeOf(item.mode);
                 const assistant = item.role === "assistant";
                 const bubbleClass = assistant
-                  ? `ra-assistant-bubble${item.mode === "reviewer" ? " reviewer" : ""}`
+                  ? `ra-assistant-bubble${item.mode === "local" ? " local" : ""}${item.mode === "reviewer" ? " reviewer" : ""}${item.mode === "comparator" ? " comparator" : ""}`
                   : "ra-user-bubble";
+                const comparatorCiteGroups = assistant && item.mode === "comparator"
+                  ? groupCitationsByFilename(item.citations || [])
+                  : [];
                 return (
-                  <div key={item.id} className={assistant ? "ra-assistant" : "ra-user"}>
+                  <div key={item.id} className={assistant ? `ra-assistant${item.mode === "comparator" ? " comparator-message" : ""}` : "ra-user"}>
                     {assistant ? <div className="ra-tag" style={{ color: mode.hex }}>{mode.glyph} {mode.name}</div> : null}
                     <div className={bubbleClass} style={!assistant ? { background: mode.hex } : null}>
+                      {assistant && item.mode === "comparator" ? (
+                        <div className="ra-comp-toolbar">
+                          <div className="ra-comp-pill">Comparator Verdict</div>
+                          <button className="ra-comp-copy" type="button" onClick={() => copyComparatorAnswer(item.id, item.content)}>
+                            {copiedComparatorId === item.id ? "Copied" : "Copy Answer"}
+                          </button>
+                        </div>
+                      ) : null}
                       {assistant && item.mode === "reviewer" && item.debug ? renderReviewerRoundEvents(item.debug) : null}
                       {assistant && item.mode === "reviewer" && item.debug && item.debug.final_report ? renderReviewerFinalReportCard(item.debug.final_report) : null}
-                      {assistant ? renderAssistantMarkdown(item.content) : item.content}
+                      {assistant
+                        ? (item.mode === "comparator" ? renderComparatorAnswer(item.content) : renderAssistantMarkdown(item.content))
+                        : item.content}
                       {assistant && item.citations && item.citations.length ? (
                         <div className="ra-cites">
                           <div className="ra-cites-head">
-                            <div className="ra-cites-title">References</div>
+                            <div className="ra-cites-title">{item.mode === "comparator" ? "Evidence" : "References"}</div>
                             <div className="ra-cites-count">{item.citations.length}</div>
                           </div>
-                          {item.citations.map((citation, index) => (
-                            <div className="ra-cite" key={`${item.id}-${index}`}>
-                              <div className="ra-cite-header">
-                                <div className="ra-cite-label">{citation.filename || "Unknown source"}</div>
-                                <div className="ra-cite-badge">[{index + 1}]</div>
-                              </div>
-                              <div className="ra-cite-block">
-                                <div className="ra-cite-meta">
-                                  {citation.page ? `Page ${citation.page}` : "Page n/a"}
-                                  {citation.chunk_id ? ` | ${citation.chunk_id}` : ""}
+                          {item.mode === "comparator" ? (
+                            <div className="ra-comp-cites-grid">
+                              {comparatorCiteGroups.map((group, groupIndex) => (
+                                <div className="ra-cite-group" key={`${item.id}-group-${groupIndex}`}>
+                                  <div className="ra-cite-group-head">{group.filename}</div>
+                                  {group.entries.map(({ citation, index }) => (
+                                    <details className="ra-cite comp" key={`${item.id}-${groupIndex}-${index}`}>
+                                      <summary className="ra-cite-summary">
+                                        <div className="ra-cite-label">[{index + 1}] {citation.page ? `p.${citation.page}` : "page n/a"}</div>
+                                        <div className="ra-cite-meta">{citation.chunk_id ? clip(citation.chunk_id, 28) : "snippet"}</div>
+                                      </summary>
+                                      <div className="ra-cite-block">
+                                        <div className="ra-cite-text">{clip(citation.snippet, 360)}</div>
+                                      </div>
+                                    </details>
+                                  ))}
                                 </div>
-                                <div className="ra-cite-text">{clip(citation.snippet, 260)}</div>
-                              </div>
+                              ))}
                             </div>
+                          ) : item.citations.map((citation, index) => (
+                            <details className="ra-cite" key={`${item.id}-${index}`}>
+                              <summary className="ra-cite-summary">
+                                <div className="ra-cite-label">[{index + 1}] {citation.filename || "Unknown source"}</div>
+                                <div className="ra-cite-meta">{citation.page ? `p.${citation.page}` : "page n/a"}</div>
+                              </summary>
+                              <div className="ra-cite-block">
+                                {citation.chunk_id ? <div className="ra-cite-meta">chunk {clip(citation.chunk_id, 40)}</div> : null}
+                                <div className="ra-cite-text">{clip(citation.snippet, 360)}</div>
+                              </div>
+                            </details>
                           ))}
                         </div>
                       ) : null}

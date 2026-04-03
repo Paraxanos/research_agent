@@ -1,334 +1,192 @@
 # Research Agent Architecture Walkthrough
 
-This is the practical, engineer-facing walkthrough for the current codebase.
-It is written as an onboarding guide: read top to bottom once, then jump to sections when you need implementation detail.
+This is the implementation-facing walkthrough for the current codebase.
 
-## 1) System At A Glance
+## 1) Modes and Intent
 
-Research Agent is a full-stack paper assistant with five modes:
+Research Agent has five modes:
 
-- `Local`: strict paper-grounded answers
-- `Global`: open conversational answers with paper context when relevant
+- `Local`: strict grounded QA from uploaded papers
+- `Global`: open responses with optional paper grounding
 - `Writer`: style-aware drafting
-- `Reviewer`: adversarial two-reviewer debate flow
-- `Comparator`: cross-paper comparison
+- `Reviewer`: Claim Trial Engine (Skeptic/Advocate/Judge/Rewrite)
+- `Comparator`: claim-level multi-paper comparison
 
-Core stack:
+## 2) Shared Execution Graph
 
-- Frontend: React (single-file shell `research_agent.jsx`)
-- Backend API: FastAPI
-- Orchestration: LangGraph state machine
-- Retrieval: hybrid dense + sparse + reranking
-- Dense store: Pinecone
-- Embeddings: local hash (default) or Gemini
-- Generation: provider router (`Groq` then `Gemini` in `auto`)
-
-## 2) Request Lifecycle (End To End)
+All modes run through the same LangGraph node order.
 
 ```mermaid
 flowchart LR
   UI[React UI] --> API[/POST /api/chat/]
   API --> RT[ResearchAgentRuntime.chat]
-  RT --> G[LangGraph]
-  G --> P[prepare_mode]
-  P --> R[retrieve]
-  R --> RR[rerank]
-  RR --> D[draft_answer]
-  D --> V[validate_answer]
-  V --> F[finalize_answer]
-  F --> API
-  API --> UI
+  RT --> PREP[prepare_mode]
+  PREP --> RETR[retrieve]
+  RETR --> RERANK[rerank]
+  RERANK --> DRAFT[draft_answer]
+  DRAFT --> VALID[validate_answer]
+  VALID --> FINAL[finalize_answer]
+  FINAL --> API
 ```
 
-Execution order is fixed and compiled in `build_graph()`.
+Compiled in `build_graph()` inside `backend/src/research_agent/graph/builder.py`.
 
-## 3) Frontend Architecture
+## 3) Reviewer Flow (Claim Trial Engine)
 
-Main file:
+Reviewer mode is implemented in `_run_reviewer_debate()` and persists state in runtime memory.
 
-- `research_agent.jsx`
+```mermaid
+flowchart TD
+  A[Reviewer request + review_paper_id] --> B[Load prior reviewer session state]
+  B --> C[Retrieve reviewer evidence with reviewer subqueries]
+  C --> D[Rerank for claim coverage]
+  D --> E[Create or reuse attack vectors]
+  E --> F{Score request?}
 
-Frontend responsibilities:
+  F -->|Yes| SCORE[Return reviewer scorecard]
+  F -->|No| G{Vectors remaining?}
 
-- Mode selection and mode-specific controls
-- Upload/delete/re-ingest interactions
-- Session-local chat history rendering
-- Reviewer panel controls and runway display
-- Citation rendering and clipping
-- Error surfacing and normalized user-facing failures
+  G -->|No| COMPLETE[Render Reviewer Complete Report]
+  G -->|Yes| H[Run debate loop]
 
-Important behavior:
+  H --> I[Skeptic / Advocate turns]
+  I --> J{Reached synthesis condition?}
+  J -->|No| I
+  J -->|Yes| K[Evidence-only Judge verdict]
+  K --> L[Generate Rewrite Compiler card]
+  L --> M[Store vector_verdicts / vector_judgments / vector_reports]
+  M --> G
 
-- On initial load, UI can clear backend paper state (configured behavior in this repo revision)
-- Reviewer prompt builder supports start messages and free intervention text
-- API calls are centralized in `api()` with error simplification
+  SCORE --> N[Return draft_answer + debug]
+  COMPLETE --> N
+```
 
-## 4) Backend Entry Points
+### Reviewer state carried across turns
 
-Primary files:
+- `attack_vectors`, `active_vector_id`, `vectors_remaining`
+- `debate_history`, `debate_summary`, `turn_count`, `next_speaker`
+- `syntheses`, `vector_verdicts`, `vector_judgments`, `vector_reports`, `final_report`
 
-- `backend/src/research_agent/api.py`
-- `backend/src/research_agent/runtime.py`
-- `backend/src/research_agent/schemas.py`
+### Reviewer output shapes
 
-Key endpoints:
+- Active debate: `## Review Panel` with latest Skeptic/Advocate points, Judge card (when available), rewrite card, and next-step routing.
+- Completed run: `## Reviewer Complete Report` with final decision, confidence, per-claim verdicts, author guidance, and transcripts.
 
-- `GET /health`
-- `GET /api/papers`
-- `POST /api/papers/upload`
-- `DELETE /api/papers`
-- `DELETE /api/papers/{paper_id}`
-- `POST /api/papers/{paper_id}/re-ingest`
-- `GET /api/style-profile`
-- `POST /api/chat`
-- `POST /api/retrieval/preview`
+## 4) Comparator Flow (Claim Matrix Lab)
 
-Runtime responsibilities:
+Comparator mode is enforced in `_draft_user_prompt(..., mode=Mode.COMPARATOR)` and structured fallback paths.
 
-- Owns ingestion/retrieval/style services
-- Invokes LangGraph for chat
-- Persists per-session reviewer state (`_reviewer_sessions`)
-- Returns final answer + citations + debug payload
+```mermaid
+flowchart TD
+  A[Comparator request + selected paper_ids] --> B[Retrieve per paper]
+  B --> C[Merge and dedupe chunks]
+  C --> D[Rerank with comparator boosts]
+  D --> E{At least 2 papers and evidence?}
 
-## 5) LangGraph Nodes (What Each One Does)
+  E -->|No| F[Structured comparator fallback]
+  E -->|Yes| G[Generate comparator response]
 
-Node flow:
+  G --> H[Section-locked format]
+  F --> I[validate_answer]
+  H --> I
+  I --> J[finalize_answer + citation reindex]
+```
 
-1. `prepare_mode`
-2. `retrieve`
-3. `rerank`
-4. `draft_answer`
-5. `validate_answer`
-6. `finalize_answer`
+Required comparator sections:
 
-### 5.1 `prepare_mode`
+1. `## Papers Compared`
+2. `## Claim Matrix`
+3. `## Conflict Map`
+4. `## Benchmark Verdict Matrix`
+5. `## Method Trade-offs`
+6. `## Synthesis Blueprint`
+7. `## Decision By Use Case`
 
-Sets strict mode instructions and initializes debug fields.
+## 5) Node Responsibilities
 
-### 5.2 `retrieve`
+### `prepare_mode`
 
-Mode-aware retrieval strategy:
+- Sets mode-specific instruction scaffold
+- Writes initial debug metadata
 
-- Reviewer: multi-subquery retrieval constrained to selected paper
-- Comparator: per-paper retrieval + merge
-- Local/Global/Writer: generalized multi-subquery retrieval path
+### `retrieve`
 
-Recent improvement:
+- `Reviewer`: reviewer-focused subqueries on selected review paper
+- `Comparator`: per-paper retrieval merge (up to first 3 papers)
+- `Local/Global/Writer`: generalized multi-subquery retrieval
 
-- General retrieval now expands subqueries for intent-heavy queries (`mixture of experts`, `MoE`, `proposed model`, etc.) to reduce lexical collision across unrelated papers.
+### `rerank`
 
-### 5.3 `rerank`
+- scores by overlap, phrases, section quality, and mode focus terms
+- reviewer/comparator get larger rerank windows for coverage
 
-Scores retrieved documents using:
+### `draft_answer`
 
-- rank prior
-- token overlap with query
-- phrase overlap with extracted query n-grams
-- mode focus-term overlap
-- section quality boosts
-- low-signal penalties
+- routes into reviewer engine or comparator generation
+- handles strict mode validations (missing paper/evidence)
+- applies provider fallback paths when model calls fail
 
-For local mode, selection includes lightweight cross-paper coverage balancing to avoid one-paper domination when multiple papers are active.
+### `validate_answer`
 
-### 5.4 `draft_answer`
+- model-based factual pass for regular paths
+- bypasses for reviewer debate output (`reviewer_debate_mode`)
 
-Generates first draft via text provider router.
+### `finalize_answer`
 
-Special branches:
+- chooses final answer text
+- selects citations and reindexes inline markers
+- writes terminal debug fields
 
-- Reviewer mode enters reviewer debate engine
-- Mode-constraint fast exits (missing paper/missing context)
-- Generation failure path goes to structured fallback
+## 6) Runtime Layer
 
-### 5.5 `validate_answer`
+`backend/src/research_agent/runtime.py` responsibilities:
 
-Second-pass factual validator:
+- invoke graph with mode payload
+- load/save reviewer session state by `(session_id, review_paper_id)`
+- return safe structured fallback if graph invocation fails
 
-- revises unsupported claims
-- enforces mode-specific strictness
-- bypasses for certain paths (writer, reviewer debate output, low-context global)
+Runtime-safe fallback includes reviewer/comparator-specific markdown scaffolds, not plain generic text.
 
-### 5.6 `finalize_answer`
+## 7) Retrieval and Storage
 
-Chooses final text and attaches citations via inline-reference-aware selection.
+Implemented pipeline:
 
-## 6) Ingestion And Chunking Pipeline
+- PDF ingest -> text extraction -> semantic chunking
+- chunk metadata persisted locally
+- dense vectors in Pinecone
+- optional sparse lexical retrieval + fusion
 
-Files:
+Persistent local artifacts:
 
-- `retrieval/ingestion.py`
-- `retrieval/chunking.py`
-- `retrieval/catalog.py`
+- `backend/storage/uploads`
+- `backend/storage/papers`
+- `backend/storage/chunks`
+- style profile store
 
-Chunking strategy is semantic, not fixed naive windows:
+## 8) Debugging Guide
 
-- sanitize page text and drop noise lines
-- split into semantic units (sentence-aware)
-- embed units
-- detect semantic breakpoints using cosine similarity drops
-- build chunks with overlap tail carryover
-- emit `Document` objects with rich metadata (`paper_id`, `filename`, `chunk_id`, `page`, etc.)
+Useful `debug` keys from `/api/chat`:
 
-This design is tuned for research PDFs where headings, section transitions, and mixed formatting are common.
+- retrieval: `retrieval_preview`, `retrieval_scores`, `retrieved_count`
+- rerank: `rerank_preview`, `reranked_count`
+- model/fallback: `response_stage`, `model_fallback`, `model_error`
+- reviewer: `active_vector_id`, `next_speaker`, `vectors_remaining`, `vector_verdicts`, `final_report_ready`
 
-## 7) Hybrid Retrieval Design
+## 9) Stress Harness
 
-Files:
+`backend/stress_test_outputs.py` runs a compact stress suite:
 
-- `retrieval/dense.py`
-- `retrieval/sparse.py`
-- `retrieval/embeddings.py`
+- Reviewer multi-turn completion and final report readiness
+- Local mode grounded numeric/math checks
+- Global mode unrestricted answer checks
+- Comparator section-marker checks
 
-### Dense path
+Run:
 
-- Pinecone cosine retrieval over chunk embeddings
-- Optional filter by `paper_id`
-
-### Sparse path
-
-- BM25-like lexical scoring over chunk manifests
-- Query term expansion for common research intents (`precision/recall`, `participants`, `OCR`, etc.)
-
-### Fusion
-
-- Reciprocal Rank Fusion (RRF)
-- configurable dense/sparse weights
-- auto-adjusted toward sparse when local-hash embeddings are active
-
-## 8) Generation Provider Routing
-
-Files:
-
-- `services/text_generation.py`
-- `services/groq_text.py`
-- `services/gemini_text.py`
-
-Provider policy:
-
-- `GENERATION_PROVIDER=auto`: try Groq, then Gemini
-- `groq` or `gemini`: force provider
-
-Failure behavior:
-
-- if all providers fail, graph uses mode-specific fallback
-- debug stores fallback stage and model error hints
-
-## 9) Reviewer Arena (Debate Engine)
-
-Reviewer state is persisted per `(session_id, paper_id)` and includes:
-
-- attack vectors
-- active vector
-- debate history and compressed summary
-- turn count, resolution, next speaker
-- per-vector verdicts and synthesis cards
-
-Debate mechanics:
-
-- Skeptic and Advocate have opposing instructions
-- Router decides next speaker using metadata + hard limits
-- hard turn cap prevents infinite loops
-- synthesis emits concrete rewrite instruction
-- score requests trigger scorecard output path
-
-## 10) Local Mode Failure-Resilience
-
-When generation is unavailable, local mode now uses extractive fallback:
-
-- attempts direct evidence sentence extraction from retrieved context
-- supports quantity-intent handling and confidence thresholds
-- if evidence is weak/non-specific, returns strict “not in uploaded papers”
-
-This prevents raw chunk dumps and keeps local mode useful under rate-limit pressure.
-
-## 11) Storage Model
-
-Persistent artifacts:
-
-- uploaded PDFs (`backend/storage/uploads`)
-- extracted paper text (`backend/storage/papers`)
-- chunk manifests (`backend/storage/chunks`)
-- paper catalog JSON
-- style profile JSON
-
-Vector state:
-
-- Pinecone index + namespace for dense retrieval
-
-Reviewer in-memory session state:
-
-- held in runtime process memory (`_reviewer_sessions`)
-- reset when paper is removed or clear endpoint is called
-
-## 12) Config Surface (Most Important Knobs)
-
-Located in `config.py`:
-
-- Retrieval:
-  - `retrieval_top_k`
-  - `hybrid_dense_top_k`
-  - `hybrid_sparse_top_k`
-  - `hybrid_rrf_k`
-  - `hybrid_dense_weight`
-  - `hybrid_sparse_weight`
-  - `rerank_top_n`
-- Chunking:
-  - `chunk_size`
-  - `chunk_overlap`
-  - `semantic_unit_max_chars`
-  - `semantic_similarity_floor`
-- Reviewer:
-  - `reviewer_max_turns`
-  - `reviewer_warning_turn`
-  - `reviewer_turns_per_response`
-  - `reviewer_attack_vector_count`
-- Generation:
-  - `generation_provider`
-  - `generation_model`
-  - `gemini_generation_model`
-
-## 13) Debugging Playbook
-
-Use `debug` payload from `/api/chat`:
-
-- `retrieval_preview` and `retrieval_scores`
-- `rerank_preview`
-- `response_stage`
-- `model_fallback`, `model_error`, `retry_hint`
-- reviewer-specific fields: `active_vector_id`, `turn_count`, `next_speaker`, `vector_verdicts`
-
-If quality drops:
-
-1. Check whether retrieval is wrong (`retrieval_preview`)
-2. Check whether rerank is wrong (`rerank_preview`)
-3. Check whether generation fell back (`model_fallback`)
-4. Check citation selection path (`citation_count`)
-
-## 14) Extension Guide
-
-Common safe extensions:
-
-- Add new mode:
-  - extend `Mode` enum + frontend mode card
-  - add mode instruction in `prepare_mode`
-  - add retrieval/query shaping branch
-- Improve local factual QA:
-  - extend extractive fallback patterns
-  - add structured answer templates by intent
-- Add provider:
-  - implement service adapter
-  - register in `TextGenerationService`
-- Improve reviewer:
-  - stronger vector generation schema checks
-  - richer verdict calibration
-  - action card templates by category
-
-## 15) Current Tradeoffs
-
-- Reviewer state is in-memory, not externalized; restart clears it.
-- Local fallback quality is bounded by extractive heuristics when generation providers are down.
-- Multi-paper lexical collisions still exist in edge prompts, but query expansion + phrase rerank significantly reduces them.
+```powershell
+python .\backend\stress_test_outputs.py
+```
 
 ---
 
-If you want this walkthrough exported as a polished PDF onboarding handout, convert this markdown plus `docs/graph_state.png` into a one-pager deck or handbook chapter.
+If behavior and docs diverge, treat `backend/src/research_agent/graph/builder.py` as source-of-truth and update this file.

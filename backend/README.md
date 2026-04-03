@@ -1,61 +1,76 @@
 # Research Agent Backend
 
-This is the backend for the research agent.
+Backend for the Research Agent app.
 
-## Current milestone
+## Current Capabilities
 
-- FastAPI app with upload, delete, chat, health, style-profile, and retrieval-preview endpoints
-- LangGraph runtime with retrieval-backed chat
-- Hybrid retrieval (dense Pinecone + sparse lexical) with reranking
-- Local hashing embeddings by default (Gemini optional)
-- Groq generation for chat and style memory
-- React frontend served directly by the backend
+- FastAPI API for health, paper management, chat, style profile, and retrieval preview
+- LangGraph runtime pipeline: `prepare_mode -> retrieve -> rerank -> draft_answer -> validate_answer -> finalize_answer`
+- Hybrid retrieval with reranking
+- Reviewer Claim Trial Engine with persisted per-session debate state
+- Comparator claim-matrix generation with structured section output
+- Runtime-safe structured fallbacks when model providers fail
 
-## Provider split
+## Modes
 
-- Pinecone: vector database
-- Local hash / Gemini: embeddings
-- Groq: generation
+- `Local`: strict grounded paper QA
+- `Global`: open response style with optional paper grounding
+- `Writer`: style-aware drafting
+- `Reviewer`: Skeptic/Advocate/Judge/Rewrite workflow
+- `Comparator`: multi-paper claim and benchmark comparison
 
-## Important note on HNSW
+## Provider Split
 
-Pinecone's current public create-index docs expose managed index options like serverless configuration, dimension, and metric. They do not expose a user-facing HNSW setting in the serverless flow. This backend therefore uses Pinecone's managed ANN retrieval path rather than pretending there is a configurable HNSW toggle.
+- Pinecone: dense vector store
+- Embeddings: local hash (default) or Gemini
+- Generation: Groq / Gemini / OpenRouter via router + fallback order
 
 ## Environment
 
-Copy `backend/.env.example` to `backend/.env` and set:
+Copy `backend/.env.example` to `backend/.env` and set relevant keys:
 
-- `GEMINI_API_KEY`
 - `PINECONE_API_KEY`
 - `GROQ_API_KEY`
+- `GEMINI_API_KEY`
 - `OPENROUTER_API_KEY`
-- `GENERATION_PROVIDER` (`auto` | `groq` | `gemini`; default `auto`)
+- `GENERATION_PROVIDER` (`auto` | `groq` | `gemini` | `openrouter`)
 - `GENERATION_FALLBACK_ORDER` (default `gemini,openrouter,groq`)
 - `GENERATION_PROVIDER_COOLDOWN_SECONDS` (default `600`)
 - `OPENROUTER_MODEL` (default `openai/gpt-4o-mini`)
 - `EMBEDDING_PROVIDER` (`local` | `auto` | `gemini`; default `local`)
 
-`local`: fully offline hashing embeddings (no Gemini quota).
-`auto`: try Gemini first, then fallback to local on quota/rate errors.
+Optional tracing:
 
-LangSmith tracing (optional):
 - `LANGSMITH_TRACING=true`
 - `LANGSMITH_API_KEY=...`
 - `LANGSMITH_PROJECT=research-agent`
-- `LANGSMITH_ENDPOINT=https://api.smith.langchain.com` (optional)
-- `LANGCHAIN_TRACING_V2=true` (optional compatibility flag)
+- `LANGSMITH_ENDPOINT=https://api.smith.langchain.com`
 
 ## Run
 
-After dependencies are installed:
+From `backend/`:
 
 ```powershell
 uvicorn research_agent.api:app --reload --app-dir src
 ```
 
-From the workspace root, this direct launch path also works:
+From workspace root:
 
 ```powershell
 $env:PYTHONPATH='backend\src'
 .\.venv\Scripts\python.exe -m uvicorn research_agent.api:app --port 8010
 ```
+
+## Stress Script
+
+```powershell
+python .\backend\stress_test_outputs.py
+```
+
+This script emits JSON with reviewer/local/global/comparator stress metrics.
+
+## Docs
+
+- [`../README.md`](../README.md)
+- [`../docs/architecture_walkthrough.md`](../docs/architecture_walkthrough.md)
+- [`../docs/graph_state.md`](../docs/graph_state.md)
