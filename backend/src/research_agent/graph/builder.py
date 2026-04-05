@@ -1049,6 +1049,184 @@ def _profile_method_signature(profile: dict[str, Any]) -> str:
     return _compact_turn_text(text, max_chars=140) if text else "distinct method emphasis not recovered"
 
 
+def _infer_paper_title(*, full_text: str, filename: str) -> str:
+    text = _clean_visible_text(full_text or "")
+    if not text:
+        return filename
+    lines = [line.strip(" -") for line in re.split(r"[\r\n]+", text[:2200]) if line.strip()]
+    candidates: list[tuple[float, str]] = []
+    for line in lines[:14]:
+        candidate = re.sub(r"\s+", " ", line).strip()
+        if not candidate or len(candidate) < 18 or len(candidate) > 180:
+            continue
+        lower = candidate.lower()
+        if any(marker in lower for marker in ("abstract", "@", "arxiv", "http://", "https://", "google", "university")):
+            continue
+        words = re.findall(r"[A-Za-z][A-Za-z0-9\-]*", candidate)
+        if len(words) < 4:
+            continue
+        title_ratio = sum(1 for word in words if word[:1].isupper()) / max(1, len(words))
+        score = title_ratio
+        if len(words) >= 6:
+            score += 0.3
+        if any(token in lower for token in ("learning", "attention", "transformer", "network", "networks", "translation", "model", "models")):
+            score += 0.35
+        candidates.append((score, candidate))
+    if candidates:
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1]
+    return filename
+
+
+def _infer_paper_year_hint(*, full_text: str, filename: str) -> str:
+    text = _clean_visible_text(full_text or "")[:800]
+    match = re.search(r"\b(19|20)\d{2}\b", text)
+    if match:
+        return match.group(0)
+    file_match = re.search(r"\b(19|20)\d{2}\b", filename)
+    if file_match:
+        return file_match.group(0)
+    return ""
+
+
+def _paper_field_contexts(*, documents: list[Document]) -> dict[str, dict[str, Any]]:
+    profiles = _paper_profiles_from_documents(documents)
+    if not profiles:
+        return {}
+
+    dossiers: list[dict[str, Any]] = []
+    for filename, profile in list(profiles.items())[:3]:
+        full_text = str(profile.get("full_text", "")).strip()
+        title = _infer_paper_title(full_text=full_text, filename=filename)
+        year_hint = _infer_paper_year_hint(full_text=full_text, filename=filename)
+        metrics = []
+        for record in list(profile.get("metric_records", []) or [])[:3]:
+            try:
+                value = float(record.get("value", 0.0))
+            except Exception:
+                continue
+            metric = str(record.get("metric", "metric")).upper()
+            benchmark = str(record.get("benchmark", "")).strip()
+            detail = f"{value:.2f} {metric}"
+            if benchmark:
+                detail += f" on {benchmark}"
+            metrics.append(detail)
+        dossiers.append(
+            {
+                "filename": filename,
+                "title": title,
+                "year_hint": year_hint,
+                "summary": _compact_turn_text(str(profile.get("summary_sentence", "")).strip(), max_chars=260),
+                "method": _compact_turn_text(str(profile.get("method_sentence", "")).strip(), max_chars=220),
+                "benchmarks": metrics,
+            }
+        )
+
+    fallback: dict[str, dict[str, Any]] = {}
+    for dossier in dossiers:
+        filename = str(dossier.get("filename", "")).strip()
+        if not filename:
+            continue
+        fallback[filename] = {
+            "field_position": "important",
+            "novelty_band": "major",
+            "historical_significance": (
+                "The retrieved paper evidence suggests a meaningful contribution, but this fallback view stays conservative about historical rank when broader field knowledge is unavailable."
+            ),
+            "reviewer_take": (
+                "Treat the work as clearly non-trivial, but separate paper-evidence novelty from stronger claims about long-term field impact unless the model can place it confidently."
+            ),
+            "comparator_take": (
+                "Historical prestige can inform interpretation, but head-to-head decisions should still be tied to grounded benchmark and method evidence."
+            ),
+            "confidence": 0.35,
+        }
+
+    if not text_service.available:
+        return fallback
+
+    try:
+        response = text_service.generate(
+            system_prompt=(
+                "You are a research-field historian helping a paper reviewer.\n"
+                "Use general field knowledge to place each paper in context, but do NOT invent paper-specific results beyond the provided dossier.\n"
+                "Return JSON only as an object keyed by filename.\n"
+                "Each value must contain: field_position, novelty_band, historical_significance, reviewer_take, comparator_take, confidence.\n"
+                "Allowed field_position values: foundational, landmark, important, solid, unclear.\n"
+                "Allowed novelty_band values: foundational, major, moderate, incremental, unclear.\n"
+                "historical_significance, reviewer_take, and comparator_take should each be 1-2 sentences.\n"
+                "Be honest about uncertainty; use 'unclear' rather than bluffing."
+            ),
+            user_prompt=(
+                "Paper dossiers:\n"
+                f"{json.dumps(dossiers)}"
+            ),
+            temperature=0.0,
+            max_output_tokens=520,
+        )
+        payload = _try_parse_json_payload(response)
+        if isinstance(payload, dict):
+            resolved: dict[str, dict[str, Any]] = {}
+            for dossier in dossiers:
+                filename = str(dossier.get("filename", "")).strip()
+                item = payload.get(filename, {})
+                if not isinstance(item, dict):
+                    resolved[filename] = fallback[filename]
+                    continue
+                resolved[filename] = {
+                    "field_position": str(item.get("field_position", "")).strip().lower() or fallback[filename]["field_position"],
+                    "novelty_band": str(item.get("novelty_band", "")).strip().lower() or fallback[filename]["novelty_band"],
+                    "historical_significance": str(item.get("historical_significance", "")).strip() or fallback[filename]["historical_significance"],
+                    "reviewer_take": str(item.get("reviewer_take", "")).strip() or fallback[filename]["reviewer_take"],
+                    "comparator_take": str(item.get("comparator_take", "")).strip() or fallback[filename]["comparator_take"],
+                    "confidence": max(0.0, min(1.0, float(item.get("confidence", fallback[filename]["confidence"])))),
+                }
+            return resolved
+    except Exception:
+        pass
+    return fallback
+
+
+def _field_novelty_score(*, base_score: int, field_context: dict[str, Any] | None) -> int:
+    if not isinstance(field_context, dict):
+        return base_score
+    band = str(field_context.get("novelty_band", "")).strip().lower()
+    confidence = float(field_context.get("confidence", 0.0) or 0.0)
+    mapped = {
+        "foundational": 10,
+        "major": 9,
+        "moderate": 7,
+        "incremental": 5,
+        "unclear": base_score,
+    }.get(band, base_score)
+    if confidence >= 0.75:
+        return int(mapped)
+    if confidence >= 0.45:
+        return int(round((base_score + mapped) / 2))
+    return int(base_score)
+
+
+def _reviewer_field_context_lines(*, documents: list[Document]) -> list[str]:
+    contexts = _paper_field_contexts(documents=documents)
+    lines: list[str] = []
+    for filename, context in list(contexts.items())[:2]:
+        position = str(context.get("field_position", "")).strip() or "unclear"
+        novelty_band = str(context.get("novelty_band", "")).strip() or "unclear"
+        significance = str(context.get("historical_significance", "")).strip()
+        reviewer_take = str(context.get("reviewer_take", "")).strip()
+        confidence = float(context.get("confidence", 0.0) or 0.0)
+        lines.append(
+            f"{filename}: field position = {position}; field-relative novelty = {novelty_band}; confidence = {confidence:.2f}."
+        )
+        if significance:
+            lines.append(f"{filename}: {significance}")
+        if reviewer_take:
+            lines.append(f"{filename}: reviewer lens = {reviewer_take}")
+        if len(lines) >= 4:
+            break
+    return lines[:4]
+
+
 def _rerank_step(state: GraphState) -> GraphState:
     documents = state.get("retrieved_documents", [])
     if not documents:
@@ -1856,6 +2034,7 @@ def _build_comparator_signal_pool(*, documents: list[Document], limit: int) -> d
 def _comparator_structured_fallback(*, documents: list[Document]) -> str:
     per_paper = _build_comparator_signal_pool(documents=documents, limit=12)
     profiles = _paper_profiles_from_documents(documents)
+    field_contexts = _paper_field_contexts(documents=documents)
     if not per_paper and not profiles:
         return "I could not retrieve enough evidence from the selected papers."
 
@@ -1886,6 +2065,7 @@ def _comparator_structured_fallback(*, documents: list[Document]) -> str:
 
     def _score_row(filename: str) -> tuple[int, int, int, str]:
         profile = profiles.get(filename, {})
+        field_context = field_contexts.get(filename, {})
         joined = " ".join(
             str(part or "").lower()
             for part in (
@@ -1899,6 +2079,7 @@ def _comparator_structured_fallback(*, documents: list[Document]) -> str:
             entries = per_paper.get(filename, [])
             joined = " ".join(str(entry.get("snippet", "")).lower() for entry in entries)
         novelty = 8 if any(token in joined for token in ("propose", "novel", "new", "first")) else 7
+        novelty = _field_novelty_score(base_score=novelty, field_context=field_context)
         rigor = 8 if (_has_metric_name(joined) or any(token in joined for token in ("benchmark", "dataset", "outperform", "results", "evaluation"))) else 6
         reproducibility = 8 if any(token in joined for token in ("training", "batch", "gpu", "implementation", "hours", "days")) else 6
         base = profiles.get(filename, {})
@@ -1907,7 +2088,12 @@ def _comparator_structured_fallback(*, documents: list[Document]) -> str:
             or base.get("summary_citation")
             or _best_entry(filename).get("citation", 1)
         )
-        justification = f"Grounded in contribution/method/result sentences recovered from the paper [{citation}]."
+        position = str(field_context.get("field_position", "")).strip().lower()
+        significance = str(field_context.get("historical_significance", "")).strip()
+        if position and significance:
+            justification = f"Grounded in contribution/method/result sentences recovered from the paper [{citation}], with field-aware novelty adjusted using a {position} historical reading."
+        else:
+            justification = f"Grounded in contribution/method/result sentences recovered from the paper [{citation}]."
         return novelty, rigor, reproducibility, justification
 
     def _profile_sentence(filename: str, *, key: str, fallback_tokens: tuple[str, ...]) -> tuple[str, int]:
@@ -1956,9 +2142,11 @@ def _comparator_structured_fallback(*, documents: list[Document]) -> str:
         return _comparator_metric_record_strings(per_paper.get(filename, []), cap=3)
 
     claim_blocks: list[str] = []
+    field_blocks: list[str] = []
     method_blocks: list[str] = []
     benchmark_rows: list[str] = []
     for filename in papers:
+        field_context = field_contexts.get(filename, {})
         contribution_text, contribution_citation = _profile_sentence(
             filename,
             key="summary_sentence",
@@ -1980,6 +2168,22 @@ def _comparator_structured_fallback(*, documents: list[Document]) -> str:
             f"- Method anchor: {method_text} [{method_citation}]\n"
             f"- Benchmark anchor: {benchmark_text} [{benchmark_citation}]"
         )
+        position = str(field_context.get("field_position", "")).strip()
+        novelty_band = str(field_context.get("novelty_band", "")).strip()
+        historical_note = str(field_context.get("historical_significance", "")).strip()
+        comparator_note = str(field_context.get("comparator_take", "")).strip()
+        confidence = float(field_context.get("confidence", 0.0) or 0.0)
+        if position or novelty_band or historical_note or comparator_note:
+            field_lines = [f"### {filename}"]
+            if position or novelty_band:
+                field_lines.append(
+                    f"- Field position: {position or 'unclear'}; field-relative novelty: {novelty_band or 'unclear'} (confidence {confidence:.2f})."
+                )
+            if historical_note:
+                field_lines.append(f"- Historical significance: {historical_note}")
+            if comparator_note:
+                field_lines.append(f"- Comparator read: {comparator_note}")
+            field_blocks.append("\n".join(field_lines))
 
         profile_efficiency = str(profiles.get(filename, {}).get("efficiency_sentence", "")).strip()
         profile_efficiency_lower = profile_efficiency.lower()
@@ -2129,6 +2333,11 @@ def _comparator_structured_fallback(*, documents: list[Document]) -> str:
         + "\n".join(f"- {paper}" for paper in papers)
         + "\n\n## Claim Matrix\n"
         + "\n\n".join(claim_blocks)
+        + (
+            "\n\n## Field Context\n" + "\n\n".join(field_blocks)
+            if field_blocks
+            else ""
+        )
         + "\n\n## Conflict Map\n"
         + "### Agreements\n"
         + "\n".join(agreement_lines)
@@ -3524,6 +3733,9 @@ def _contains_ocr_noise(text: str) -> bool:
 
 def _clean_local_math_text(text: str) -> str:
     cleaned = _clean_visible_text(text or "")
+    # LLM validator fallbacks can preserve JSON-escaped LaTeX (e.g., \\frac),
+    # which KaTeX then renders as plain text tokens. Normalize to single slashes.
+    cleaned = re.sub(r"\\\\(?=[A-Za-z])", r"\\", cleaned)
     replacements = {
         "QK T": "QK^T",
         "QK t": "QK^T",
@@ -4156,6 +4368,7 @@ def _recover_revised_answer(text: str) -> str:
     if quoted_match:
         candidate = quoted_match.group(1)
         candidate = candidate.replace('\\"', '"').replace("\\n", "\n").strip()
+        candidate = re.sub(r"\\\\(?=[A-Za-z])", r"\\", candidate)
         if candidate:
             return candidate
 
@@ -4186,12 +4399,17 @@ def _comparator_output_vision() -> str:
         "- Read like a strong research decision memo, not a generic summary.\n"
         "- Make benchmark overlap explicit: exact slice, family-level overlap, or no fair comparison.\n"
         "- Each paper should sound distinct in method, evidence strength, and trade-offs.\n"
+        "- Separate paper-grounded evidence from field-relative importance; both matter for novelty valuation.\n"
         "- Prefer honest abstention over weak filler.\n"
         "Mini mock shape:\n"
         "## Claim Matrix\n"
         "### paper-a.pdf\n"
         "- Core contribution: names the concrete method delta and why it matters [1]\n"
         "- Evidence boundary: strongest metric is tied to one exact setup, not the whole paper [2]\n"
+        "## Field Context\n"
+        "### paper-a.pdf\n"
+        "- Historical position: foundational / landmark / important / unclear.\n"
+        "- Field-relative novelty: say how big the contribution was at publication time.\n"
         "## Common Benchmark Analysis\n"
         "- Shared slice: benchmark family + exact setting if recovered.\n"
         "- paper-a.pdf: metric.\n"
@@ -4209,6 +4427,7 @@ def _reviewer_output_vision() -> str:
         "Target style:\n"
         "- Sound like a sharp but fair senior reviewer.\n"
         "- Separate what the paper proves from what the paper merely suggests.\n"
+        "- Separate paper-grounded novelty from field-relative novelty and historical importance.\n"
         "- Use claim-specific strengths and revisions; avoid template reuse.\n"
         "- Anchor each verdict in one concrete quote or benchmark fact.\n"
         "- Panel-summary sections should read like short analyst paragraphs, not one-line placeholders.\n"
@@ -4216,6 +4435,9 @@ def _reviewer_output_vision() -> str:
         "Mini mock shape:\n"
         "## Reviewer Complete Report\n"
         "Final Decision: Borderline / Weak Accept / Weak Reject with one-sentence reason.\n"
+        "### Field Context\n"
+        "- Historical position: foundational / landmark / important / unclear.\n"
+        "- Novelty-at-publication: separate from whether the local snippet evidence is well scoped.\n"
         "### Strengths Worth Keeping\n"
         "- Claim-specific strength tied to an exact method or metric anchor.\n"
         "### High-Impact Concerns\n"
@@ -4369,6 +4591,7 @@ def _draft_user_prompt(
             "- If benchmark overlap is unproven, state non-overlap explicitly.\n"
             "- Avoid speculation; abstain when evidence is weak.\n"
             "- You may use background field knowledge only to interpret why a grounded difference matters; never invent uncited paper-specific facts.\n"
+            "- Use field knowledge explicitly for historical position and novelty-at-publication judgments when you can do so honestly.\n"
             "- Prefer exact shared benchmark slices (same dataset/task/setting) over looser family matches.\n"
             "- If papers share only the benchmark family or metric family, say so and withhold head-to-head numeric winners.\n"
             "- Do not say a paper lacks benchmark results when the evidence pack lists recovered metrics for it.\n"
@@ -4376,12 +4599,14 @@ def _draft_user_prompt(
             "- Output markdown with EXACT sections:\n"
             "  1) ## Papers Compared\n"
             "  2) ## Claim Matrix\n"
-            "  3) ## Conflict Map\n"
-            "  4) ## Benchmark Verdict Matrix\n"
-            "  5) ## Method Trade-offs\n"
-            "  6) ## Synthesis Blueprint\n"
-            "  7) ## Decision By Use Case\n"
+            "  3) ## Field Context\n"
+            "  4) ## Conflict Map\n"
+            "  5) ## Benchmark Verdict Matrix\n"
+            "  6) ## Method Trade-offs\n"
+            "  7) ## Synthesis Blueprint\n"
+            "  8) ## Decision By Use Case\n"
             "- Claim Matrix: at least 2 strong claims per paper with direct evidence.\n"
+            "- Field Context: state historical position and field-relative novelty separately from paper-grounded benchmark evidence.\n"
             "- Conflict Map: include Agreements, Contradictions, Non-overlap.\n"
             "- Benchmark Verdict Matrix: score novelty, empirical rigor, reproducibility (1-10) with justification.\n"
             "- Benchmark Verdict Matrix must also include a `Common Benchmark Analysis` subsection:\n"
@@ -4441,6 +4666,7 @@ def _comparator_compact_generation_prompt(
         "Return markdown with EXACT sections:\n"
         "## Papers Compared\n"
         "## Claim Matrix\n"
+        "## Field Context\n"
         "## Conflict Map\n"
         "## Benchmark Verdict Matrix\n"
         "## Method Trade-offs\n"
@@ -4452,6 +4678,7 @@ def _comparator_compact_generation_prompt(
         "- Every winner statement must include citation [n] or 'No winner (insufficient evidence)'.\n"
         "- Avoid speculative claims unless explicitly grounded.\n\n"
         "- You may add short background interpretation only when it explains a grounded difference; do not invent uncited paper facts.\n"
+        "- Use field-relative context for historical importance and novelty-at-publication when it is genuinely known.\n"
         "- Prefer exact shared benchmark slices over loose family matches, and withhold direct winners when the slices differ.\n\n"
         "Quality target:\n"
         f"{_comparator_output_vision()}\n"
@@ -7067,6 +7294,7 @@ def _render_reviewer_complete_report(
         cap=5,
     )
     context_snapshot = [str(item).strip() for item in final_report.get("context_snapshot", []) if str(item).strip()]
+    field_context = [str(item).strip() for item in final_report.get("field_context", []) if str(item).strip()]
     suggestions = [str(item).strip() for item in final_report.get("final_suggestions", []) if str(item).strip()]
 
     lines: list[str] = [
@@ -7085,6 +7313,9 @@ def _render_reviewer_complete_report(
     if context_snapshot:
         lines.extend(["", "### Paper Snapshot"])
         lines.extend(f"- {item}" for item in context_snapshot[:5])
+    if field_context:
+        lines.extend(["", "### Field Context"])
+        lines.extend(f"- {item}" for item in field_context[:4])
     if suggestions:
         lines.extend(["", "### Required Revisions"])
         lines.extend(f"- {item}" for item in suggestions[:6])
@@ -7113,6 +7344,9 @@ def _render_reviewer_complete_report(
             quote=primary_snippet,
             evidence_pack=evidence_pack if isinstance(evidence_pack, list) else [],
         )
+        if category == "novelty" and field_context:
+            field_note = re.sub(r"^[^:]+:\s*", "", field_context[0]).strip()
+            reviewer_read = f"{reviewer_read} Field-aware note: {field_note}".strip()
         rewrite = _extract_patch_instruction(syntheses.get(vector_id, ""))
         if not rewrite or _looks_generic_patch_instruction(rewrite):
             rewrite = _claim_specific_reviewer_suggestion(
@@ -7414,6 +7648,7 @@ def _build_reviewer_final_report(
     documents: list[Document],
 ) -> dict[str, Any]:
     context_snapshot = _reviewer_global_context_snapshot(documents=documents)
+    field_context = _reviewer_field_context_lines(documents=documents)
     fallback = _fallback_reviewer_final_report(
         attack_vectors=attack_vectors,
         vector_verdicts=vector_verdicts,
@@ -7421,6 +7656,7 @@ def _build_reviewer_final_report(
         vector_reports=vector_reports,
         syntheses=syntheses,
         context_snapshot=context_snapshot,
+        field_context=field_context,
     )
     if not text_service.available:
         return fallback
@@ -7431,12 +7667,13 @@ def _build_reviewer_final_report(
                 "Return JSON only with keys:\n"
                 "overview (string), agreements (array of strings), disagreements (array of strings),\n"
                 "common_points (array of strings), skeptic_conclusion (string), advocate_conclusion (string),\n"
-                "joint_conclusion (string), final_suggestions (array of strings), final_decision (string), confidence (number 0..1).\n"
+                "joint_conclusion (string), field_context (array of strings), final_suggestions (array of strings), final_decision (string), confidence (number 0..1).\n"
                 "Requirements:\n"
                 "- concise, evidence-grounded, no generic filler\n"
                 "- avoid repeating near-identical suggestions across claims\n"
                 "- every suggestion must be claim-specific and actionable\n"
                 "- common_points must be substantive reviewer takeaways, not placeholders\n"
+                "- field_context must separate paper-grounded novelty from field-relative novelty and historical importance\n"
                 "- skeptic_conclusion, advocate_conclusion, and joint_conclusion should each be 2-3 sentences, specific to this paper and panel outcome\n"
                 "- do not output lines like 'the provided evidence supports the claim' or 'no major unresolved disagreements were recorded' unless there is no stronger paper-specific wording available\n\n"
                 "Quality target:\n"
@@ -7455,6 +7692,8 @@ def _build_reviewer_final_report(
                 f"{_format_panel_history_compact(debate_history=debate_history, max_turns=14)}\n\n"
                 "Global context snapshot (must inform the final report):\n"
                 f"{json.dumps(context_snapshot)}\n\n"
+                "Field-aware context scaffold (refine if the model knows more, but stay honest):\n"
+                f"{json.dumps(field_context)}\n\n"
                 "Retrieved context:\n"
                 f"{_format_context(documents, max_docs=max(settings.rerank_top_n, 10))}"
             ),
@@ -7471,6 +7710,7 @@ def _build_reviewer_final_report(
                 "skeptic_conclusion": str(payload.get("skeptic_conclusion", "")).strip(),
                 "advocate_conclusion": str(payload.get("advocate_conclusion", "")).strip(),
                 "joint_conclusion": str(payload.get("joint_conclusion", "")).strip(),
+                "field_context": [str(item).strip() for item in payload.get("field_context", []) if str(item).strip()],
                 "final_suggestions": [
                     str(item).strip() for item in payload.get("final_suggestions", []) if str(item).strip()
                 ],
@@ -7492,6 +7732,8 @@ def _build_reviewer_final_report(
                     report["advocate_conclusion"] = fallback["advocate_conclusion"]
                 if not report["joint_conclusion"]:
                     report["joint_conclusion"] = fallback["joint_conclusion"]
+                if not report["field_context"]:
+                    report["field_context"] = fallback["field_context"]
                 if not report["final_suggestions"]:
                     report["final_suggestions"] = fallback["final_suggestions"]
                 quality_issues = _reviewer_report_quality_issues(report=report, attack_vectors=attack_vectors)
@@ -7512,6 +7754,7 @@ def _fallback_reviewer_final_report(
     vector_reports: dict[str, dict[str, Any]],
     syntheses: dict[str, str],
     context_snapshot: list[str] | None = None,
+    field_context: list[str] | None = None,
 ) -> dict[str, Any]:
     skeptic_wins = sum(1 for verdict in vector_verdicts.values() if verdict == "skeptic_prevailed")
     advocate_wins = sum(1 for verdict in vector_verdicts.values() if verdict == "advocate_prevailed")
@@ -7627,6 +7870,7 @@ def _fallback_reviewer_final_report(
         "disagreements": disagreements[:5],
         "common_points": common_points[:5],
         "context_snapshot": snapshot[:4] if isinstance(snapshot, list) else [],
+        "field_context": field_context[:4] if isinstance(field_context, list) else [],
         "skeptic_conclusion": _reviewer_side_conclusion(
             side="skeptic",
             attack_vectors=attack_vectors,
@@ -8260,6 +8504,7 @@ def _render_reviewer_final_report_markdown(report: dict[str, Any]) -> str:
     disagreements = report.get("disagreements", [])
     common_points = report.get("common_points", [])
     context_snapshot = report.get("context_snapshot", [])
+    field_context = report.get("field_context", [])
     suggestions = report.get("final_suggestions", [])
     confidence = float(report.get("confidence", 0.0))
     lines = [
@@ -8282,6 +8527,11 @@ def _render_reviewer_final_report_markdown(report: dict[str, Any]) -> str:
         lines.extend(f"- {str(item).strip()}" for item in context_snapshot if str(item).strip())
     else:
         lines.append("- No additional context snapshot captured.")
+    lines.extend(["", "### Field Context"])
+    if isinstance(field_context, list) and field_context:
+        lines.extend(f"- {str(item).strip()}" for item in field_context if str(item).strip())
+    else:
+        lines.append("- No field-context assessment captured.")
     lines.extend(["", "### Common Points"])
     if isinstance(common_points, list) and common_points:
         lines.extend(f"- {str(item).strip()}" for item in common_points if str(item).strip())

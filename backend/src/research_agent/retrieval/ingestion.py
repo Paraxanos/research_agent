@@ -52,8 +52,8 @@ class PaperIngestionService:
         if not chunks:
             raise ValueError(f"No text could be extracted from {safe_name}.")
 
-        self._dense.upsert_documents(chunks)
         self._write_chunk_manifest(paper_id=paper_id, chunks=chunks)
+        self._upsert_dense_chunks(chunks)
 
         record = PaperSummary(
             paper_id=paper_id,
@@ -106,9 +106,8 @@ class PaperIngestionService:
         # Chunk
         chunks = self._chunk_pages(pages, paper_id=paper_id, filename=paper.filename)
 
-        # Upsert
-        self._dense.upsert_documents(chunks)
         self._write_chunk_manifest(paper_id=paper_id, chunks=chunks)
+        self._upsert_dense_chunks(chunks)
 
         # Update catalog with new counts
         updated_paper = paper.model_copy(update={
@@ -154,3 +153,31 @@ class PaperIngestionService:
         manifest_path = self._settings.chunk_manifest_dir / f"{paper_id}.json"
         if manifest_path.exists():
             manifest_path.unlink()
+
+    def _upsert_dense_chunks(self, chunks: list[Document]) -> None:
+        try:
+            self._dense.upsert_documents(chunks)
+        except Exception as error:
+            if self._is_recoverable_dense_error(error):
+                # Sparse retrieval still works from local chunk manifests.
+                return
+            raise
+
+    def _is_recoverable_dense_error(self, error: Exception) -> bool:
+        provider = (self._settings.embedding_provider or "").lower().strip()
+        message = str(error).lower()
+        if "pinecone_api_key is required" in message:
+            return True
+        if provider != "local":
+            return False
+        marker_phrases = (
+            "pinecone",
+            "name or service not known",
+            "temporary failure in name resolution",
+            "connection error",
+            "connection reset",
+            "timed out",
+            "service unavailable",
+            "dns",
+        )
+        return any(marker in message for marker in marker_phrases)

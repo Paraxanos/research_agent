@@ -4,6 +4,81 @@ const API_BASE = "/api";
 const CSS = `
   * { box-sizing: border-box; }
   body { color: #e6eefc; font-family: "IBM Plex Sans","Segoe UI",sans-serif; }
+  .ra-home-shell { min-height: 100vh; background:
+    radial-gradient(circle at 12% 18%, rgba(103, 187, 255, 0.18), transparent 28%),
+    radial-gradient(circle at 88% 14%, rgba(255, 183, 77, 0.16), transparent 24%),
+    radial-gradient(circle at 50% 110%, rgba(244, 114, 182, 0.14), transparent 34%),
+    linear-gradient(180deg, #06111d 0%, #0a1424 48%, #0d1829 100%);
+  }
+  .ra-home-topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 18px 28px; backdrop-filter: blur(16px); background: rgba(6, 13, 23, 0.72); border-bottom: 1px solid rgba(177, 199, 238, 0.08); }
+  .ra-home-brand { display: flex; align-items: center; gap: 12px; }
+  .ra-home-wordmark { display: flex; flex-direction: column; gap: 3px; }
+  .ra-home-kicker { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: #8ea5ca; font-weight: 700; }
+  .ra-home-name { font-size: 15px; color: #f7fbff; font-weight: 700; }
+  .ra-home-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .ra-home-navbtn, .ra-home-cta, .ra-home-ghost, .ra-home-modecard, .ra-home-stat, .ra-home-proof, .ra-home-panel, .ra-home-flowcard, .ra-home-quote { border: 1px solid rgba(173, 194, 229, 0.14); }
+  .ra-home-navbtn, .ra-home-ghost, .ra-home-cta { cursor: pointer; border-radius: 999px; padding: 10px 14px; font: inherit; }
+  .ra-home-navbtn, .ra-home-ghost { background: rgba(16, 25, 42, 0.72); color: #d8e5fb; }
+  .ra-home-cta { background: linear-gradient(135deg, #c7ecff, #88b8ff 55%, #ffd485); color: #081221; font-weight: 800; box-shadow: 0 14px 28px rgba(72, 121, 196, 0.28); }
+  .ra-home-main { padding: 34px 28px 54px; display: flex; flex-direction: column; gap: 34px; }
+  .ra-home-hero { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr); gap: 22px; align-items: stretch; }
+  .ra-home-panel { border-radius: 30px; background: linear-gradient(160deg, rgba(11, 20, 35, 0.88), rgba(12, 22, 38, 0.96)); box-shadow: 0 24px 60px rgba(0,0,0,.28); }
+  .ra-home-hero-copy { padding: 34px; position: relative; overflow: hidden; }
+  .ra-home-hero-copy::after { content: ""; position: absolute; inset: auto -80px -110px auto; width: 280px; height: 280px; border-radius: 999px; background: radial-gradient(circle, rgba(255, 187, 92, 0.16), transparent 62%); pointer-events: none; }
+  .ra-home-badge { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; background: rgba(255,255,255,.04); border: 1px solid rgba(177,199,238,.14); color: #cddcf7; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
+  .ra-home-title { margin: 18px 0 14px; font-size: clamp(42px, 5.4vw, 74px); line-height: .98; letter-spacing: -.05em; color: #f7fbff; font-weight: 800; max-width: 11ch; }
+  .ra-home-title-accent { display: block; color: #ffd596; }
+  .ra-home-subtext { max-width: 640px; font-size: 17px; line-height: 1.78; color: #a9bddf; }
+  .ra-home-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+  .ra-home-proofrow { margin-top: 22px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .ra-home-proof { padding: 14px; border-radius: 18px; background: rgba(16, 27, 45, 0.72); }
+  .ra-home-proof-label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #86a0cb; font-weight: 700; margin-bottom: 8px; }
+  .ra-home-proof-value { font-size: 20px; color: #f6fbff; font-weight: 700; margin-bottom: 6px; }
+  .ra-home-proof-note { font-size: 13px; line-height: 1.55; color: #9eb1d3; }
+  .ra-home-hero-side { padding: 24px; display: flex; flex-direction: column; gap: 14px; background:
+    linear-gradient(155deg, rgba(255, 208, 132, 0.10), transparent 26%),
+    linear-gradient(180deg, rgba(16, 24, 40, 0.94), rgba(12, 18, 31, 0.98)); }
+  .ra-home-side-title { font-size: 12px; letter-spacing: .13em; text-transform: uppercase; color: #ffd9aa; font-weight: 700; }
+  .ra-home-side-headline { font-size: 27px; line-height: 1.08; color: #fff3df; font-weight: 800; margin: 2px 0 6px; }
+  .ra-home-side-copy { font-size: 14px; line-height: 1.72; color: #d9e6fb; }
+  .ra-home-stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .ra-home-stat { border-radius: 18px; padding: 16px; background: rgba(20, 30, 50, 0.76); }
+  .ra-home-stat-num { font-size: 28px; line-height: 1; color: #f7fbff; font-weight: 800; margin-bottom: 8px; }
+  .ra-home-stat-text { font-size: 13px; line-height: 1.55; color: #9fb2d5; }
+  .ra-home-quote { border-radius: 18px; padding: 16px; background: rgba(10, 16, 28, 0.88); color: #dce8ff; font-size: 14px; line-height: 1.72; }
+  .ra-home-quote strong { color: #ffffff; }
+  .ra-home-section-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+  .ra-home-section-kicker { font-size: 11px; letter-spacing: .15em; text-transform: uppercase; color: #8ea5ca; font-weight: 700; margin-bottom: 8px; }
+  .ra-home-section-title { font-size: clamp(28px, 3vw, 40px); line-height: 1.04; letter-spacing: -.04em; color: #f8fbff; font-weight: 800; margin: 0; }
+  .ra-home-section-copy { max-width: 620px; color: #9fb4d9; font-size: 15px; line-height: 1.75; }
+  .ra-home-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .ra-home-modecard { border-radius: 24px; padding: 18px; background: linear-gradient(160deg, rgba(14, 23, 39, 0.92), rgba(10, 16, 29, 0.96)); cursor: pointer; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
+  .ra-home-modecard:hover { transform: translateY(-3px); box-shadow: 0 18px 36px rgba(0,0,0,.22); }
+  .ra-home-modeicon { width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; color: #07111d; font-size: 16px; font-weight: 800; margin-bottom: 14px; }
+  .ra-home-modename { font-size: 17px; color: #f2f7ff; font-weight: 700; margin-bottom: 8px; }
+  .ra-home-modedesc { font-size: 14px; line-height: 1.62; color: #9eb2d6; margin-bottom: 14px; }
+  .ra-home-modefoot { font-size: 12px; line-height: 1.55; color: #c8d8f5; }
+  .ra-home-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .ra-home-flowcard { border-radius: 24px; padding: 20px; background: linear-gradient(160deg, rgba(14, 23, 39, 0.92), rgba(10, 16, 29, 0.96)); }
+  .ra-home-flowstep { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 999px; background: rgba(130, 171, 242, 0.14); color: #dceaff; font-size: 12px; font-weight: 800; margin-bottom: 12px; }
+  .ra-home-flowtitle { font-size: 18px; color: #f6fbff; font-weight: 700; margin-bottom: 8px; }
+  .ra-home-flowcopy { font-size: 14px; line-height: 1.7; color: #a2b6d8; }
+  .ra-home-bottomcta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: 26px 28px; border-radius: 28px; background:
+    radial-gradient(circle at right top, rgba(255, 203, 125, 0.16), transparent 28%),
+    linear-gradient(160deg, rgba(15, 24, 42, 0.94), rgba(9, 15, 27, 0.98)); border: 1px solid rgba(177,199,238,0.14); box-shadow: 0 24px 60px rgba(0,0,0,.24); }
+  .ra-home-bottomtitle { font-size: 30px; line-height: 1.06; letter-spacing: -.04em; color: #f7fbff; font-weight: 800; margin-bottom: 8px; }
+  .ra-home-bottomcopy { font-size: 15px; line-height: 1.72; color: #a6bbdf; max-width: 760px; }
+  @media (max-width: 1120px) {
+    .ra-home-hero { grid-template-columns: 1fr; }
+    .ra-home-modes, .ra-home-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ra-home-bottomcta { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 760px) {
+    .ra-home-topbar, .ra-home-main { padding-left: 16px; padding-right: 16px; }
+    .ra-home-title { max-width: none; font-size: 42px; }
+    .ra-home-proofrow, .ra-home-stat-grid, .ra-home-modes, .ra-home-flow, .ra-home-grid { grid-template-columns: 1fr; }
+    .ra-home-hero-copy, .ra-home-hero-side, .ra-home-bottomcta { padding: 20px; }
+  }
   .ra-app { display: flex; height: 100vh; background: radial-gradient(circle at top right, rgba(122,162,255,.18), transparent 30%), linear-gradient(180deg, #09101d 0%, #0e1728 100%); }
   .ra-side { width: 268px; display: flex; flex-direction: column; gap: 16px; padding: 22px 18px; border-right: 1px solid rgba(166,186,228,.15); background: linear-gradient(180deg, rgba(14,23,40,.96), rgba(10,17,30,.98)); }
   .ra-brand { display: flex; flex-direction: column; gap: 6px; }
@@ -244,8 +319,183 @@ function simplifyError(detail) {
   return text || "Request failed.";
 }
 
+function HomePage({
+  papers,
+  health,
+  styleProfile,
+  onEnterWorkspace,
+  onUpload,
+  onChooseMode,
+}) {
+  const indexedCount = Number(health?.indexed_papers || papers.length || 0);
+  const modeCards = MODES.map((mode) => ({
+    ...mode,
+    note:
+      mode.id === "reviewer"
+        ? "Run a structured skeptic-vs-advocate panel with grounded judge calls."
+        : mode.id === "comparator"
+          ? "Compare 2-3 papers with claim matrices, shared-benchmark reads, and decisions."
+          : mode.id === "local"
+            ? "Stay closest to paper evidence when you need trustworthy, narrow answers."
+            : mode.id === "global"
+              ? "Add broader reasoning without losing the paper trail."
+              : "Turn indexed research context into drafts and writing support.",
+  }));
+
+  return (
+    <div className="ra-home-shell">
+      <div className="ra-home-topbar">
+        <div className="ra-home-brand">
+          <div className="ra-brand-badge">RA</div>
+          <div className="ra-home-wordmark">
+            <div className="ra-home-kicker">Research Workspace</div>
+            <div className="ra-home-name">Research Agent</div>
+          </div>
+        </div>
+        <div className="ra-home-nav">
+          <button type="button" className="ra-home-navbtn" onClick={onUpload}>Upload Papers</button>
+          <button type="button" className="ra-home-cta" onClick={onEnterWorkspace}>Enter Workspace</button>
+        </div>
+      </div>
+
+      <div className="ra-home-main">
+        <section className="ra-home-hero">
+          <div className="ra-home-panel ra-home-hero-copy">
+            <div className="ra-home-badge">Paper-grounded research OS</div>
+            <h1 className="ra-home-title">
+              Review, compare, and write from your papers.
+              <span className="ra-home-title-accent">In one serious workspace.</span>
+            </h1>
+            <div className="ra-home-subtext">
+              Research Agent is built for people who want more than chat. It indexes papers, separates grounded evidence from field-aware judgment, and gives you dedicated modes for local reasoning, reviewer-style critique, paper comparison, and drafting.
+            </div>
+            <div className="ra-home-actions">
+              <button type="button" className="ra-home-cta" onClick={onEnterWorkspace}>Open Product</button>
+              <button type="button" className="ra-home-ghost" onClick={onUpload}>Upload PDFs First</button>
+            </div>
+            <div className="ra-home-proofrow">
+              <div className="ra-home-proof">
+                <div className="ra-home-proof-label">Indexed Papers</div>
+                <div className="ra-home-proof-value">{indexedCount}</div>
+                <div className="ra-home-proof-note">Dense + sparse retrieval with reranking behind every grounded answer.</div>
+              </div>
+              <div className="ra-home-proof">
+                <div className="ra-home-proof-label">Specialized Modes</div>
+                <div className="ra-home-proof-value">{MODES.length}</div>
+                <div className="ra-home-proof-note">Local, global, writer, reviewer, and comparator workflows in one system.</div>
+              </div>
+              <div className="ra-home-proof">
+                <div className="ra-home-proof-label">Writer Memory</div>
+                <div className="ra-home-proof-value">{styleProfile?.active ? `${styleProfile.source_count}` : "Off"}</div>
+                <div className="ra-home-proof-note">{styleProfile?.active ? "Persistent writing profile is active from your uploaded research." : "Upload more papers to build a persistent writing profile."}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="ra-home-panel ra-home-hero-side">
+            <div className="ra-home-side-title">Why this is different</div>
+            <div className="ra-home-side-headline">Not just answers. Decision-grade research help.</div>
+            <div className="ra-home-side-copy">
+              The product page you already have is the working cockpit. The homepage should explain why that cockpit exists: grounded local reasoning, reviewer-style pressure testing, comparison across papers, and writing support that stays inside your actual corpus.
+            </div>
+            <div className="ra-home-stat-grid">
+              <div className="ra-home-stat">
+                <div className="ra-home-stat-num">{health?.llm_available ? "Ready" : "Setup"}</div>
+                <div className="ra-home-stat-text">Provider failover and backend routing are active for live use.</div>
+              </div>
+              <div className="ra-home-stat">
+                <div className="ra-home-stat-num">2 Layers</div>
+                <div className="ra-home-stat-text">Paper-grounded evidence plus controlled field-aware interpretation.</div>
+              </div>
+            </div>
+            <div className="ra-home-quote">
+              <strong>Best fit:</strong> labs, students, and research teams who want one place to ask grounded questions, benchmark ideas, and produce reviewer-grade critique without bouncing between five separate tools.
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div className="ra-home-section-head">
+            <div>
+              <div className="ra-home-section-kicker">Core Modes</div>
+              <h2 className="ra-home-section-title">Choose the thinking mode, not just the prompt.</h2>
+            </div>
+            <div className="ra-home-section-copy">
+              The homepage should sell the product through clear product surfaces. Each mode below should feel like a distinct workflow, not a hidden prompt trick.
+            </div>
+          </div>
+          <div className="ra-home-modes" style={{ marginTop: 18 }}>
+            {modeCards.map((mode) => (
+              <button
+                key={`home-mode-${mode.id}`}
+                type="button"
+                className="ra-home-modecard"
+                onClick={() => onChooseMode(mode.id)}
+              >
+                <div className="ra-home-modeicon" style={{ background: `linear-gradient(135deg, ${mode.hex}, #f6fbff)` }}>{mode.glyph}</div>
+                <div className="ra-home-modename">{mode.name}</div>
+                <div className="ra-home-modedesc">{mode.desc}</div>
+                <div className="ra-home-modefoot">{mode.note}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section>
+          <div className="ra-home-section-head">
+            <div>
+              <div className="ra-home-section-kicker">How It Works</div>
+              <h2 className="ra-home-section-title">A homepage that explains the workflow in three moves.</h2>
+            </div>
+            <div className="ra-home-section-copy">
+              This is the narrative a first-time visitor should get before seeing the cockpit: bring papers in, choose the mode, get analysis that can actually support a decision.
+            </div>
+          </div>
+          <div className="ra-home-flow" style={{ marginTop: 18 }}>
+            <div className="ra-home-flowcard">
+              <div className="ra-home-flowstep">01</div>
+              <div className="ra-home-flowtitle">Build the paper memory</div>
+              <div className="ra-home-flowcopy">
+                Upload PDFs once. The system chunks, indexes, and keeps them ready for local grounding, comparisons, and review runs.
+              </div>
+            </div>
+            <div className="ra-home-flowcard">
+              <div className="ra-home-flowstep">02</div>
+              <div className="ra-home-flowtitle">Pick the research job</div>
+              <div className="ra-home-flowcopy">
+                Ask a strict local question, run a reviewer panel, compare two papers, or draft from your research voice. The UI should make these feel like product choices, not hidden commands.
+              </div>
+            </div>
+            <div className="ra-home-flowcard">
+              <div className="ra-home-flowstep">03</div>
+              <div className="ra-home-flowtitle">Get grounded output</div>
+              <div className="ra-home-flowcopy">
+                Outputs stay close to evidence when they should, and can use controlled field-aware context when novelty, impact, or historical significance need more than snippet reading.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="ra-home-bottomcta">
+          <div>
+            <div className="ra-home-bottomtitle">The homepage should promise confidence. The workspace should deliver it.</div>
+            <div className="ra-home-bottomcopy">
+              Right now you already have the workspace. This homepage template gives the product a real front door: it frames the value, explains the modes, and leads people into the product with a clear expectation of what makes it different.
+            </div>
+          </div>
+          <div className="ra-home-actions" style={{ marginTop: 0 }}>
+            <button type="button" className="ra-home-cta" onClick={onEnterWorkspace}>Launch Workspace</button>
+            <button type="button" className="ra-home-ghost" onClick={onUpload}>Add Papers</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function renderLatex(expression, { displayMode = false, key } = {}) {
-  const latex = String(expression || "").trim();
+  let latex = String(expression || "").trim();
+  latex = latex.replace(/\\\\(?=[A-Za-z])/g, "\\");
   if (!latex) return null;
   const katex = typeof window !== "undefined" ? window.katex : null;
   if (katex && typeof katex.renderToString === "function") {
@@ -575,6 +825,8 @@ function groupCitationsByFilename(citations) {
 
 function renderReviewerFinalReportCard(report) {
   if (!report || typeof report !== "object") return null;
+  const agreements = Array.isArray(report.agreements) ? report.agreements.filter(Boolean) : [];
+  const disagreements = Array.isArray(report.disagreements) ? report.disagreements.filter(Boolean) : [];
   const commonPoints = Array.isArray(report.common_points) ? report.common_points.filter(Boolean) : [];
   const confidence = Number.isFinite(Number(report.confidence)) ? Number(report.confidence) : null;
 
@@ -585,6 +837,20 @@ function renderReviewerFinalReportCard(report) {
         <div className="ra-review-chip">{confidence !== null ? `confidence ${(confidence * 100).toFixed(0)}%` : "executive summary"}</div>
       </div>
       <div className="ra-review-overview">{report.overview || "Final panel summary is ready."}</div>
+      <div className="ra-review-grid" style={{ marginBottom: 10 }}>
+        <div className="ra-review-col">
+          <h4>Agreements</h4>
+          <ul>
+            {(agreements.length ? agreements : ["No explicit agreements captured."]).map((item, idx) => <li key={`ag-${idx}`}>{item}</li>)}
+          </ul>
+        </div>
+        <div className="ra-review-col">
+          <h4>Major Disagreements</h4>
+          <ul>
+            {(disagreements.length ? disagreements : ["No major disagreements captured."]).map((item, idx) => <li key={`dg-${idx}`}>{item}</li>)}
+          </ul>
+        </div>
+      </div>
       <div className="ra-review-col" style={{ marginBottom: 10 }}>
         <h4>Common Points</h4>
         <ul>
@@ -669,6 +935,7 @@ async function api(path, options) {
 
 function ResearchAgent() {
   const [sid] = useState(() => sessionId());
+  const [showHome, setShowHome] = useState(true);
   const [activeMode, setActiveMode] = useState("global");
   const [draft, setDraft] = useState("");
   const [papers, setPapers] = useState([]);
@@ -750,6 +1017,13 @@ function ResearchAgent() {
     if (modeId === activeMode) return;
     setActiveMode(modeId);
     setHistory((current) => current.concat({ type: "divider", id: `${Date.now()}-${modeId}`, mode: modeId }));
+  }
+
+  function enterWorkspace(modeId = "") {
+    if (modeId && modeId !== activeMode) {
+      setActiveMode(modeId);
+    }
+    setShowHome(false);
   }
 
   function toggleComparator(paperId) {
@@ -899,6 +1173,22 @@ function ResearchAgent() {
     } catch (err) {}
   }
 
+  if (showHome) {
+    return (
+      <>
+        <input ref={fileRef} type="file" accept=".pdf,application/pdf" multiple style={{ display: "none" }} onChange={uploadFiles} />
+        <HomePage
+          papers={papers}
+          health={health}
+          styleProfile={styleProfile}
+          onEnterWorkspace={() => enterWorkspace()}
+          onUpload={() => fileRef.current && fileRef.current.click()}
+          onChooseMode={(modeId) => enterWorkspace(modeId)}
+        />
+      </>
+    );
+  }
+
   return (
     <div className="ra-app">
       <aside className="ra-side">
@@ -906,6 +1196,15 @@ function ResearchAgent() {
           <div className="ra-brand-row"><div className="ra-brand-badge">RA</div><div>Research Agent</div></div>
           <div className="ra-subtitle">Pinecone + Gemini + Groq + OpenRouter</div>
         </div>
+        <button
+          type="button"
+          className="ra-btn"
+          style={{ paddingTop: 10, paddingBottom: 10, background: "rgba(15,23,39,.78)" }}
+          onClick={() => setShowHome(true)}
+        >
+          Home
+          <div style={{ marginTop: 4, fontSize: 12, color: "#8ea3c8" }}>Go back to the landing page</div>
+        </button>
         <input ref={fileRef} type="file" accept=".pdf,application/pdf" multiple style={{ display: "none" }} onChange={uploadFiles} />
         <button className="ra-btn" disabled={uploading} onClick={() => fileRef.current && fileRef.current.click()}>
           {uploading ? "Uploading and indexing..." : "Upload PDF"}
