@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: research-agent
+    runtime: python
+    buildCommand: |
+      cd backend && pip install -e .
+    startCommand: |
+      cd backend && uvicorn research_agent.api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: GENERATION_PROVIDER
+        value: auto
+      - key: GENERATION_FALLBACK_ORDER
+        value: groq,openrouter,gemini
+      - key: EMBEDDING_PROVIDER
+        value: local
