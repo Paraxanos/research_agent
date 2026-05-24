@@ -195,34 +195,34 @@ function AmbientCanvas() {
 function Sidebar({ activeMode, onModeChange }) {
   const iconMap = { local:"local", global:"global", writer:"writer", reviewer:"reviewer", comparator:"comparator" };
   return (
-    <aside className="fixed left-0 top-0 bottom-0 z-50 flex w-[180px] flex-col border-r border-[var(--border)] py-5" style={{background:"rgba(5,7,9,0.85)",backdropFilter:"blur(20px)"}}>
+    <aside className="fixed left-0 top-0 bottom-0 z-50 flex w-16 md:w-[180px] flex-col border-r border-[var(--border)] py-5" style={{background:"rgba(5,7,9,0.85)",backdropFilter:"blur(20px)"}}>
       {/* Logo — exact match: landing .nav-logo-icon */}
-      <div className="flex items-center gap-2.5 px-5 mb-5">
+      <div className="flex items-center justify-center md:justify-start gap-2.5 px-0 md:px-5 mb-5">
         <div className="flex h-9 w-9 items-center justify-center rounded-[10px] text-[12px] font-extrabold text-[#021a0f] select-none shrink-0"
           style={{background:"linear-gradient(135deg, var(--green), #34d399)", boxShadow:"0 0 20px var(--green-dim)"}}>
           RA
         </div>
-        <span className="text-sm font-bold text-[var(--text)]" style={{letterSpacing:"-0.02em"}}>Research Agent</span>
+        <span className="text-sm font-bold text-[var(--text)] hidden md:block" style={{letterSpacing:"-0.02em"}}>Research Agent</span>
       </div>
-      <div className="mx-4 h-px bg-[var(--border)] mb-3" />
+      <div className="mx-2 md:mx-4 h-px bg-[var(--border)] mb-3" />
 
       {/* Mode buttons — always show icon + label */}
       <div className="flex flex-col gap-0.5 px-3">
         {MODES.map(mode => {
           const active = activeMode === mode.id;
           return (
-            <button key={mode.id} type="button" onClick={() => onModeChange(mode.id)}
-              className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-200 w-full text-left ${active ? "text-[var(--green)]" : "text-[var(--text-dim)] hover:text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.03)]"}`}
+            <button key={mode.id} type="button" onClick={() => onModeChange(mode.id)} title={mode.name}
+              className={`group relative flex items-center justify-center md:justify-start gap-3 rounded-xl px-0 md:px-3 py-2.5 transition-all duration-200 w-full text-left ${active ? "text-[var(--green)]" : "text-[var(--text-dim)] hover:text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.03)]"}`}
               style={active ? {background:"rgba(0,255,159,0.08)", boxShadow:"0 0 20px rgba(0,255,159,0.1)", transition:"all 0.25s cubic-bezier(0.16,1,0.3,1)"} : {transition:"all 0.25s cubic-bezier(0.16,1,0.3,1)"}}>
               <Icon name={iconMap[mode.id]} className="w-[18px] h-[18px] shrink-0" />
-              <span className={`text-[13px] font-medium truncate ${active ? "text-[var(--green)]" : ""}`}>{mode.name}</span>
+              <span className={`text-[13px] font-medium truncate hidden md:block ${active ? "text-[var(--green)]" : ""}`}>{mode.name}</span>
               {active && <span className="absolute right-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-full bg-[var(--green)]" style={{boxShadow:"0 0 8px var(--green)"}} />}
             </button>
           );
         })}
       </div>
-      <div className="mt-auto mx-4 h-px bg-[var(--border)] mb-3" />
-      <div className="px-5 text-[9px] text-[var(--text-dim)] font-bold tracking-widest opacity-40">LANGRAPH · RAG</div>
+      <div className="mt-auto mx-2 md:mx-4 h-px bg-[var(--border)] mb-3" />
+      <div className="px-2 md:px-5 text-[9px] text-[var(--text-dim)] font-bold tracking-widest opacity-40 text-center md:text-left">LANGRAPH</div>
     </aside>
   );
 }
@@ -232,9 +232,9 @@ function Sidebar({ activeMode, onModeChange }) {
    ════════════════════════════════════════════════════════ */
 function Header({ title, papersCount, health, onTogglePanel, panelOpen }) {
   return (
-    <header className="flex items-center justify-between gap-4 px-1 py-2.5 shrink-0">
+    <header className="flex items-center justify-between gap-2 md:gap-4 px-1 py-2.5 shrink-0 flex-wrap">
       <h1 className="text-lg font-bold tracking-tight text-[var(--text)]" style={{letterSpacing:"-0.02em"}}>{title}</h1>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 md:gap-2">
         {/* Badges — exact match: landing .badge style */}
         <Badge active><PulseDot active /> {papersCount} Indexed</Badge>
         <Badge active={health.graph_ready}><PulseDot active={health.graph_ready} /> {health.graph_ready?"System Ready":"Loading"}</Badge>
@@ -265,7 +265,7 @@ function FilePanel({ papers, selectedIds, activeMode, fileStates, onSelect, onUp
   const isGlobal = activeMode === "global";
   const selectable = activeMode !== "writer";
   return (
-    <div className="flex flex-col h-full border-l border-[var(--border)]" style={{background:"rgba(5,7,9,0.75)",backdropFilter:"blur(16px)"}}>
+    <div className="flex flex-col h-full md:border-l border-[var(--border)]" style={{background:"rgba(5,7,9,0.75)",backdropFilter:"blur(16px)"}}>
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
         <div className="flex items-center gap-2">
           <Icon name="file" className="w-4 h-4 text-[var(--text-dim)]" />
@@ -666,12 +666,17 @@ function ResearchAgent() {
   /* Task-based loading — each request permanently owns its originating mode */
   const [activeTasks, setActiveTasks] = useState({});
   const [error, setError] = useState("");
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [copiedId, setCopiedId] = useState("");
   const [fileStates, setFileStates] = useState({});
   const fileRef = useRef(null);
   const didReset = useRef(false);
+
+  useEffect(() => {
+    // default panel open on desktop
+    if(window.innerWidth > 768) setPanelOpen(true);
+  }, []);
 
   /* Derived — selectedIds is the CURRENT mode's selections */
   const currentMode = modeOf(activeMode);
@@ -847,9 +852,9 @@ function ResearchAgent() {
       <Sidebar activeMode={activeMode} onModeChange={changeMode} />
 
       {/* Main area */}
-      <div className="flex-1 flex flex-col ml-[180px] relative z-10">
+      <div className="flex-1 flex flex-col ml-16 md:ml-[180px] relative z-10 w-[calc(100%-4rem)] md:w-auto">
         {/* Header */}
-        <div className="px-6">
+        <div className="px-3 md:px-6">
           <Header title={currentMode.name} papersCount={papers.length} health={health} onTogglePanel={()=>setPanelOpen(!panelOpen)} panelOpen={panelOpen} />
         </div>
 
@@ -868,7 +873,7 @@ function ResearchAgent() {
 
           {/* File panel */}
           {panelOpen && (
-            <div className="w-[280px] shrink-0">
+            <div className="absolute inset-y-0 right-0 z-40 md:relative w-full sm:w-[280px] shrink-0 border-l border-[var(--border)] shadow-2xl md:shadow-none bg-[rgba(5,7,9,0.95)] md:bg-transparent backdrop-blur-xl md:backdrop-blur-none transition-all">
               <FilePanel papers={allPapers} selectedIds={selectedIds} activeMode={activeMode} fileStates={fileStates}
                 onSelect={selectPaper} onUploadClick={handleUploadClick}
                 onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} dragging={dragging} onDelete={deletePaper} />
