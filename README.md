@@ -1,5 +1,7 @@
 # Research Agent — AI-Powered Research Paper Assistant
 
+🚀 **Live Demo / Deployed Site**: [https://research-agent-2s0j.onrender.com/](https://research-agent-2s0j.onrender.com/)
+
 ## Table of Contents
 
 1. [Project Description](#project-description)
