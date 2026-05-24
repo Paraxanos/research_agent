@@ -195,34 +195,33 @@ function AmbientCanvas() {
 function Sidebar({ activeMode, onModeChange }) {
   const iconMap = { local:"local", global:"global", writer:"writer", reviewer:"reviewer", comparator:"comparator" };
   return (
-    <aside className="fixed left-0 top-0 bottom-0 z-50 flex w-16 md:w-[180px] flex-col border-r border-[var(--border)] py-5" style={{background:"rgba(5,7,9,0.85)",backdropFilter:"blur(20px)"}}>
+    <aside className="hidden md:flex flex-col w-[200px] h-full border-r border-[var(--border)] py-5 shrink-0" style={{background:"rgba(5,7,9,0.85)",backdropFilter:"blur(20px)"}}>
       {/* Logo — exact match: landing .nav-logo-icon */}
-      <div className="flex items-center justify-center md:justify-start gap-2.5 px-0 md:px-5 mb-5">
+      <div className="flex items-center gap-2.5 px-5 mb-6 mt-1">
         <div className="flex h-9 w-9 items-center justify-center rounded-[10px] text-[12px] font-extrabold text-[#021a0f] select-none shrink-0"
           style={{background:"linear-gradient(135deg, var(--green), #34d399)", boxShadow:"0 0 20px var(--green-dim)"}}>
           RA
         </div>
-        <span className="text-sm font-bold text-[var(--text)] hidden md:block" style={{letterSpacing:"-0.02em"}}>Research Agent</span>
+        <span className="text-sm font-bold text-[var(--text)]" style={{letterSpacing:"-0.02em"}}>Research Agent</span>
       </div>
-      <div className="mx-2 md:mx-4 h-px bg-[var(--border)] mb-3" />
-
-      {/* Mode buttons — always show icon + label */}
-      <div className="flex flex-col gap-0.5 px-3">
+      
+      {/* Mode buttons */}
+      <div className="flex flex-col gap-1 px-3">
         {MODES.map(mode => {
           const active = activeMode === mode.id;
           return (
             <button key={mode.id} type="button" onClick={() => onModeChange(mode.id)} title={mode.name}
-              className={`group relative flex items-center justify-center md:justify-start gap-3 rounded-xl px-0 md:px-3 py-2.5 transition-all duration-200 w-full text-left ${active ? "text-[var(--green)]" : "text-[var(--text-dim)] hover:text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.03)]"}`}
+              className={`group relative flex items-center gap-3 rounded-xl px-3 py-3 transition-all duration-200 w-full text-left ${active ? "text-[var(--green)]" : "text-[var(--text-dim)] hover:text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.03)]"}`}
               style={active ? {background:"rgba(0,255,159,0.08)", boxShadow:"0 0 20px rgba(0,255,159,0.1)", transition:"all 0.25s cubic-bezier(0.16,1,0.3,1)"} : {transition:"all 0.25s cubic-bezier(0.16,1,0.3,1)"}}>
-              <Icon name={iconMap[mode.id]} className="w-[18px] h-[18px] shrink-0" />
-              <span className={`text-[13px] font-medium truncate hidden md:block ${active ? "text-[var(--green)]" : ""}`}>{mode.name}</span>
+              <Icon name={iconMap[mode.id]||mode.id} className="w-[18px] h-[18px] shrink-0" />
+              <span className={`text-[13px] font-medium truncate ${active ? "text-[var(--green)]" : ""}`}>{mode.name}</span>
               {active && <span className="absolute right-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-full bg-[var(--green)]" style={{boxShadow:"0 0 8px var(--green)"}} />}
             </button>
           );
         })}
       </div>
-      <div className="mt-auto mx-2 md:mx-4 h-px bg-[var(--border)] mb-3" />
-      <div className="px-2 md:px-5 text-[9px] text-[var(--text-dim)] font-bold tracking-widest opacity-40 text-center md:text-left">LANGRAPH</div>
+      <div className="mt-auto mx-4 h-px bg-[var(--border)] mb-3" />
+      <div className="px-5 text-[9px] text-[var(--text-dim)] font-bold tracking-widest opacity-40">LANGRAPH · RAG</div>
     </aside>
   );
 }
@@ -842,25 +841,27 @@ function ResearchAgent() {
 
   /* ═══ RENDER ═══ */
   return (
-    <div className="h-screen flex overflow-hidden relative" style={{fontFamily:"'Inter',-apple-system,sans-serif"}}
+    <div className="h-screen w-full flex flex-col md:flex-row overflow-hidden relative bg-[var(--bg)]" style={{fontFamily:"'Inter',-apple-system,sans-serif"}}
       onDragOver={e=>{e.preventDefault();setDragging(true);}} onDragLeave={()=>setDragging(false)} onDrop={handleDrop}>
 
-      {/* Living background — same as landing page */}
+      {/* Living background */}
       <AmbientCanvas />
 
-      {/* Sidebar */}
-      <Sidebar activeMode={activeMode} onModeChange={changeMode} />
+      {/* Desktop Sidebar (hidden on mobile) */}
+      <div className="hidden md:block shrink-0 z-20 h-full">
+        <Sidebar activeMode={activeMode} onModeChange={changeMode} />
+      </div>
 
-      {/* Main area */}
-      <div className="flex-1 flex flex-col ml-16 md:ml-[180px] relative z-10 w-[calc(100%-4rem)] md:w-auto">
+      {/* Main Container */}
+      <div className="flex-1 flex flex-col min-w-0 relative z-10 h-full">
         {/* Header */}
-        <div className="px-3 md:px-6">
+        <div className="px-3 md:px-6 shrink-0">
           <Header title={currentMode.name} papersCount={papers.length} health={health} onTogglePanel={()=>setPanelOpen(!panelOpen)} panelOpen={panelOpen} />
         </div>
 
-        <div className="flex-1 flex overflow-hidden">
-          {/* Conversation */}
-          <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex overflow-hidden relative">
+          {/* Conversation Area */}
+          <div className="flex-1 flex flex-col min-w-0 h-full">
             <ConversationStream history={history} activeTasks={activeTasks} activeMode={activeMode} currentMode={currentMode} copiedId={copiedId} onCopy={copyText}
               selectedPapers={selectedPapers} papers={papers} onDeselect={(pid)=>setModeSelections(s=>({...s,[activeMode]:(s[activeMode]||[]).filter(id=>id!==pid)}))} />
             <BottomBar draft={draft} onChange={setDraft} onKeyDown={onKeyDown} onSend={sendChat} onAttach={handleUploadClick}
@@ -871,14 +872,31 @@ function ResearchAgent() {
               contextCount={selectedIds.length} />
           </div>
 
-          {/* File panel */}
+          {/* File panel (Right Sidebar or Modal on Mobile) */}
           {panelOpen && (
-            <div className="absolute inset-y-0 right-0 z-40 md:relative w-full sm:w-[280px] shrink-0 border-l border-[var(--border)] shadow-2xl md:shadow-none bg-[rgba(5,7,9,0.95)] md:bg-transparent backdrop-blur-xl md:backdrop-blur-none transition-all">
+            <div className="absolute inset-y-0 right-0 z-40 md:relative w-full sm:w-[320px] md:w-[280px] shrink-0 border-l border-[var(--border)] shadow-2xl md:shadow-none bg-[rgba(5,7,9,0.95)] md:bg-transparent backdrop-blur-xl md:backdrop-blur-none transition-all flex flex-col h-full">
+              {/* Close button on mobile overlay */}
+              <div className="md:hidden absolute top-3 right-3 z-50">
+                <button onClick={()=>setPanelOpen(false)} className="p-2 rounded-full bg-[rgba(255,255,255,0.1)] text-white"><Icon name="x" className="w-5 h-5"/></button>
+              </div>
               <FilePanel papers={allPapers} selectedIds={selectedIds} activeMode={activeMode} fileStates={fileStates}
                 onSelect={selectPaper} onUploadClick={handleUploadClick}
                 onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} dragging={dragging} onDelete={deletePaper} />
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Mobile Bottom Navigation (hidden on desktop) */}
+      <div className="md:hidden shrink-0 border-t border-[var(--border)] bg-[rgba(5,7,9,0.85)] backdrop-blur-xl relative z-30 pb-safe">
+        <div className="flex justify-around items-center px-1 py-1.5">
+          {MODES.map(mode => (
+            <button key={mode.id} onClick={()=>changeMode(mode.id)} 
+              className={`flex flex-col items-center justify-center gap-1 p-2 flex-1 rounded-xl transition-all ${activeMode===mode.id ? 'text-[var(--green)] bg-[rgba(0,255,159,0.08)]' : 'text-[var(--text-dim)] hover:text-[var(--text-muted)]'}`}>
+              <Icon name={mode.id==="local"?"local":mode.id==="global"?"global":mode.id==="writer"?"writer":mode.id==="reviewer"?"reviewer":"comparator"} className="w-[18px] h-[18px]" />
+              <span className="text-[9px] font-bold tracking-wider uppercase">{mode.name.split(" ")[0]}</span>
+            </button>
+          ))}
         </div>
       </div>
 
