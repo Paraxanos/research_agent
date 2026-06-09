@@ -1,0 +1,35 @@
+name: Keep-Alive Server Ping
+
+on:
+  schedule:
+    # Run every 14 minutes to keep the Render free tier instance heated (spins down after 15m)
+    - cron: '*/14 * * * *'
+  workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
+
+jobs:
+  ping:
+    name: Ping Render Server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send GET Request to Server Health Endpoint
+        run: |
+          # Use secrets.RENDER_SERVICE_URL if configured, otherwise default to the live backend URL
+          URL="${{ secrets.RENDER_SERVICE_URL }}"
+          if [ -z "$URL" ]; then
+            URL="https://research-agent-2s0j.onrender.com/health"
+          fi
+          echo "Sending health ping to: $URL"
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" "$URL")
+          
+          # Extract body and status code
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          STATUS=$(echo "$RESPONSE" | tail -n1 | cut -d':' -f2)
+          
+          echo "Response Body: $BODY"
+          echo "HTTP Status Code: $STATUS"
+          
+          if [ "$STATUS" -ne 200 ]; then
+            echo "Error: Server returned status code $STATUS"
+            exit 1
+          fi
+          echo "Server is healthy and active!"
