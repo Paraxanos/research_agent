@@ -38,6 +38,29 @@
       src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
       crossorigin="anonymous"
     ></script>
-    <script type="text/babel" src="./research_agent.jsx"></script>
+    <script>
+      (async function loadResearchAgent() {
+        try {
+          let response = null;
+          for (const bundleUrl of ["./research_agent.jsx", "/research_agent.jsx"]) {
+            response = await fetch(bundleUrl, { cache: "no-store" });
+            if (response.ok) break;
+          }
+          if (!response || !response.ok) {
+            throw new Error(`Could not load research_agent.jsx (${response ? response.status : "no response"})`);
+          }
+          const source = await response.text();
+          const transformed = Babel.transform(source, {
+            filename: "research_agent.jsx",
+            presets: [["react", { runtime: "classic" }]],
+          }).code;
+          const script = document.createElement("script");
+          script.text = `${transformed}\n//# sourceURL=research_agent.jsx`;
+          document.body.appendChild(script);
+        } catch (error) {
+          console.error("Failed to start Research Agent", error);
+        }
+      })();
+    </script>
   </body>
 </html>
